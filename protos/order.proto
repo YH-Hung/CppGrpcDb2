@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package order_service.v1;
+
+enum OrderStatus {
+  PENDING = 0;
+  PROCESSING = 1;
+  SHIPPED = 2;
+  DELIVERED = 3;
+  CANCELLED = 4;
+}
+
+message Item {
+  string id = 1;
+  string name = 2;
+  double price = 3;
+  int32 quantity = 4;
+}
+
+message Order {
+  string id = 1;
+  OrderStatus status = 2;
+  string address = 3;
+  double total_price = 4;
+  repeated Item items = 5;
+  int64 created_at = 6;
+  int64 updated_at = 7;
+}
+
+message GetRequest {
+  string order_id = 1;
+}
+
+message GetResponse {
+  Order order = 1;
+}
+
+message ListRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 page = 3;
+  map<string, string> filter = 4;
+}
+
+message ListResponse {
+  repeated Order orders = 1;
+  int32 total = 2;
+}
+
+message CreateRequest {
+  string user_id = 1;
+  Order order = 2;
+}
+
+message CreateResponse {
+  Order order = 1;
+}
+
+message UpdateRequest {
+  Order order = 1;
+}
+
+message UpdateResponse {
+  Order order = 1;
+}
+
+message StreamOrderUpdateRequest {
+  string order_id = 1;
+}
+
+enum UpdateType {
+  CREATED = 0;
+  UPDATED = 1;
+  STATUS_CHANGE = 2;
+}
+
+message StreamOrderUpdateResponse {
+  Order order = 1;
+  UpdateType type = 2;
+  int64 updated_at = 3;
+}
+
+service OrderService {
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc StreamOrderUpdates(StreamOrderUpdateRequest) returns (stream StreamOrderUpdateResponse);
+}
