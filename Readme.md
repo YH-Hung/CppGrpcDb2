@@ -52,3 +52,14 @@ Go to the build directory (CppGrpcDb2/build)
 cmake -DCMAKE_INSTALL_PREFIX=$HOME/.local --fresh .. 
 cmake --build .
 ```
+
+## Dev container
+
+Build image first to avoid redundant docker build.
+Copy the Dockerfile next to grpc repository to build the image if required. 
+
+```bash
+docker build -t dev-container-cpp-db2:alpha1 .
+#docker build -f .devcontainer/Dockerfile -t dev-container-cpp-db2:alpha1 . > build.log 2>&1
+```
+
