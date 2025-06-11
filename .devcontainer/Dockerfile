@@ -4,6 +4,7 @@ USER root
 # Install required packages
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        clang \
         cmake \
         git unzip \
         build-essential autoconf libtool pkg-config \

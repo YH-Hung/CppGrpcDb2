@@ -64,3 +64,20 @@ foreach (_target greeter_server greeter_client)
     )
 endforeach ()
 
+# Enable testing
+enable_testing()
+include(cmake/gtest.cmake)
+
+# Create library
+add_library(msvc STATIC src/msvc/msvc.cpp)
+
+# Create test executable
+add_executable(strset_tests
+        tests/msvc/test_strset.cpp
+)
+target_include_directories(strset_tests PUBLIC 
+    src/msvc
+)
+target_link_libraries(strset_tests GTest::gtest GTest::gtest_main msvc)
+
+add_test(NAME StrsetUnitTests COMMAND strset_tests)
