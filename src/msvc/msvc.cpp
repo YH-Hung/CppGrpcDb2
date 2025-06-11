@@ -2,6 +2,8 @@
 // Created by Ying Han Hung on 2025/6/11.
 //
 #include "msvc.h"
+#include <cctype>
+#include <cstring>
 
 char * strset(char *str, int c) {
     if (str == nullptr) {
@@ -19,4 +21,15 @@ char * strset(char *str, int c) {
     }
 
     return original;
+}
+
+// Implementation of strupr for Linux
+char* strupr(char* str) {
+    if (!str) return nullptr;
+    char* orig = str;
+    while (*str) {
+        *str = std::toupper(static_cast<unsigned char>(*str));
+        ++str;
+    }
+    return orig;
 }

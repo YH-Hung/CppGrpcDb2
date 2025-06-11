@@ -72,12 +72,9 @@ include(cmake/gtest.cmake)
 add_library(msvc STATIC src/msvc/msvc.cpp)
 
 # Create test executable
-add_executable(strset_tests
-        tests/msvc/test_strset.cpp
-)
-target_include_directories(strset_tests PUBLIC 
-    src/msvc
-)
-target_link_libraries(strset_tests GTest::gtest GTest::gtest_main msvc)
-
-add_test(NAME StrsetUnitTests COMMAND strset_tests)
+foreach (_test_target test_strset test_strupr)
+    add_executable(${_test_target} tests/msvc/${_test_target}.cpp)
+    target_include_directories(${_test_target} PUBLIC src/msvc)
+    target_link_libraries(${_test_target} GTest::gtest GTest::gtest_main msvc)
+    add_test(NAME ${_test_target} COMMAND ${_test_target})
+endforeach ()
