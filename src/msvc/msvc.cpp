@@ -4,6 +4,23 @@
 #include "msvc.h"
 #include <cctype>
 #include <cstring>
+#include <strings.h>
+
+int stricmp(const char* str1, const char* str2) {
+    // Add null pointer safety to match Visual C++ behavior
+    if (str1 == nullptr && str2 == nullptr) {
+        return 0;
+    }
+    if (str1 == nullptr) {
+        return -1;
+    }
+    if (str2 == nullptr) {
+        return 1;
+    }
+    
+    // Use standard strcasecmp for the actual comparison
+    return strcasecmp(str1, str2);
+}
 
 char * strset(char *str, int c) {
     if (str == nullptr) {

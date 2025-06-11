@@ -72,7 +72,7 @@ include(cmake/gtest.cmake)
 add_library(msvc STATIC src/msvc/msvc.cpp)
 
 # Create test executable
-foreach (_test_target test_strset test_strupr)
+foreach (_test_target test_strset test_strupr test_stricmp test_max)
     add_executable(${_test_target} tests/msvc/${_test_target}.cpp)
     target_include_directories(${_test_target} PUBLIC src/msvc)
     target_link_libraries(${_test_target} GTest::gtest GTest::gtest_main msvc)
