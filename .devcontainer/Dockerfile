@@ -1,18 +1,29 @@
-FROM mcr.microsoft.com/devcontainers/cpp:1-debian-12
+FROM debian:12-slim
 
-ARG REINSTALL_CMAKE_VERSION_FROM_SOURCE="none"
+USER root
+# Install required packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        clang \
+        cmake \
+        git unzip \
+        build-essential autoconf libtool pkg-config \
+        && rm -rf /var/lib/apt/lists/*
 
-# Optionally install the cmake for vcpkg
-COPY ./reinstall-cmake.sh /tmp/
+# Install gRPC globally
+#ADD third_party/grpc /tmp/grpc
+ADD grpc /tmp/grpc
+RUN mkdir -p /tmp/grpc/cmake/build
 
-RUN if [ "${REINSTALL_CMAKE_VERSION_FROM_SOURCE}" != "none" ]; then \
-        chmod +x /tmp/reinstall-cmake.sh && /tmp/reinstall-cmake.sh ${REINSTALL_CMAKE_VERSION_FROM_SOURCE}; \
-    fi \
-    && rm -f /tmp/reinstall-cmake.sh
+RUN cd /tmp/grpc/cmake/build && \
+    cmake -DCMAKE_BUILD_TYPE=Release -DgRPC_INSTALL=ON -DgRPC_BUILD_TESTS=OFF \
+     -DCMAKE_CXX_STANDARD=17 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 --fresh ../.. && \
+    make -j $(nproc) && make install && \
+    cd / && rm -rf /tmp/grpc /tmp/grpc.zip
 
-# [Optional] Uncomment this section to install additional vcpkg ports.
-# RUN su vscode -c "${VCPKG_ROOT}/vcpkg install <your-port-name-here>"
+# Set working directory (matches workspaceFolder)
+RUN mkdir -p /workspace
+WORKDIR /workspace
 
-# [Optional] Uncomment this section to install additional packages.
-# RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-#     && apt-get -y install --no-install-recommends <your-package-list-here>
+# Default command for devcontainer
+CMD [ "sleep", "infinity" ]

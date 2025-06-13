@@ -71,6 +71,21 @@ foreach (_target greeter_server greeter_client)
     )
 endforeach ()
 
+# Enable testing
+enable_testing()
+include(cmake/gtest.cmake)
+
+# Create library
+add_library(msvc STATIC src/msvc/msvc.cpp)
+
+# Create test executable
+foreach (_test_target test_strset test_strupr test_stricmp test_max)
+    add_executable(${_test_target} tests/msvc/${_test_target}.cpp)
+    target_include_directories(${_test_target} PUBLIC src/msvc)
+    target_link_libraries(${_test_target} GTest::gtest GTest::gtest_main msvc)
+    add_test(NAME ${_test_target} COMMAND ${_test_target})
+endforeach ()
+
 # Add DB2 environment variables to the build
 #add_custom_target(set_db2_env
 #    COMMAND ${CMAKE_COMMAND} -E env
@@ -83,4 +98,3 @@ endforeach ()
 #    "PATH=${DB2_CLI_DRIVER_DIR}/bin:$ENV{PATH}"
 #    COMMENT "Setting up DB2 environment variables"
 #)
-
