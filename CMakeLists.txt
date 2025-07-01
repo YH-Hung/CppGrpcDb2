@@ -46,7 +46,7 @@ endforeach()
 
 include_directories(${generated_dir})
 
-foreach (_target greeter_server greeter_client)
+foreach (_target greeter_callback_server greeter_server greeter_client)
     add_executable(${_target}
             src/${_target}.cpp
     )
