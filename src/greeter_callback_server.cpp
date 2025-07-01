@@ -15,6 +15,7 @@
 #else
 #include "helloworld.grpc.pb.h"
 #endif
+#include "spdlog/spdlog.h"
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -32,6 +33,7 @@ class GreeterServiceImpl final : public Greeter::CallbackService {
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
                                const HelloRequest* request,
                                HelloReply* reply) override {
+    spdlog::info("Received request for name: {}", request->name());
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
 
@@ -55,7 +57,7 @@ void RunServer(uint16_t port) {
   builder.RegisterService(&service);
   // Finally assemble the server.
   std::unique_ptr<Server> server(builder.BuildAndStart());
-  std::cout << "Server listening on " << server_address << std::endl;
+  spdlog::info("Server listening on {}", server_address);
 
   // Wait for the server to shutdown. Note that some other thread must be
   // responsible for shutting down the server for this call to ever return.

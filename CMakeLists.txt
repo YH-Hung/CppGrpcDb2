@@ -9,6 +9,9 @@ include(cmake/db2.cmake)
 # Resolve gRPC library
 include(cmake/grpc.cmake)
 
+# Resolve spdlog library
+include(cmake/spdlog.cmake)
+
 # Get proto files
 file(GLOB PROTO_FILES "${CMAKE_SOURCE_DIR}/protos/*.proto")
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/gen_proto")
@@ -68,6 +71,7 @@ foreach (_target greeter_callback_server greeter_server greeter_client)
             ${_GRPC_GRPCPP}
             ${_PROTOBUF_LIBPROTOBUF}
             db2
+            spdlog::spdlog
     )
 endforeach ()
 
