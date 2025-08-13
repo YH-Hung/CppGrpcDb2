@@ -15,7 +15,7 @@ cmake --version
 ### Install required tools
 
 ```bash
-brew install autoconf automake libtool pkg-config
+brew install autoconf automake libtool pkg-config spdlog
 ```
 
 ### Install gRPC and protobuf
@@ -26,9 +26,13 @@ Directly install through brew. Noticed that protobuf is the protoc.
 brew install grpc protobuf
 ```
 
-Or like linux, build and install from source
+Or like linux, build and install from source.
+You MUST check out a specific version rather than staying on the main branch.
 
 ```bash
+export MY_INSTALL_DIR=$HOME/.local
+#export PATH="$MY_INSTALL_DIR/bin:$PATH"
+
 git clone --recurse-submodules -b v1.72.0 --depth 1 --shallow-submodules https://github.com/grpc/grpc
 cd grpc
 mkdir -p cmake/build
@@ -37,11 +41,55 @@ cmake -DgRPC_INSTALL=ON \
       -DgRPC_BUILD_TESTS=OFF \
       -DCMAKE_CXX_STANDARD=17 \
       -DCMAKE_INSTALL_PREFIX=$MY_INSTALL_DIR \
-      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-      ../..
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      ../.. --fresh
 make -j 4
 make install
 popd
+```
+
+If you want to enable gRPC OTEL plugin,
+rebuild gRPC with ```-DgRPC_BUILD_GRPCPP_OTEL_PLUGIN=ON``` after installed ```opeentelemetry-cpp```. 
+
+### DB2 Driver
+
+- Download DB2 CLI driver from https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/
+- Extract and put clidriver folder under third_party/
+
+### OpenTelemetry Client
+
+Directly install through brew.
+
+```bash
+brew install opentelemetry-cpp
+```
+
+Or like linux, build and install from source. Following dependencies are required.
+
+- Abseil
+- Protobuf
+- gRPC
+
+You MUST check out a specific version rather than staying on the main branch.
+
+```bash
+export MY_INSTALL_DIR=$HOME/.local
+
+git clone --recurse-submodules https://github.com/open-telemetry/opentelemetry-cpp
+cd opentelemetry-cpp
+mkdir -p build
+pushd build
+cmake -DBUILD_TESTING=OFF \
+      -DBUILD_SHARED_LIBS=ON \
+      -DWITH_OTLP_GRPC=ON \
+      -DWITH_OTLP_HTTP=ON \
+      -DWITH_PROMETHEUS=ON \
+      -DOPENTELEMETRY_INSTALL=ON \
+      -DCMAKE_INSTALL_PREFIX=$MY_INSTALL_DIR \
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      .. --fresh
+cmake --build . --parallel 4 --target all
+cmake --install .
 ```
 
 ### Build a project
