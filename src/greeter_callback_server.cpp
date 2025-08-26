@@ -1,6 +1,11 @@
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
+#include <prometheus/exposer.h>
+#include <prometheus/registry.h>
+#include <prometheus/counter.h>
+#include <prometheus/histogram.h>
+#include <chrono>
 
 #include <iostream>
 #include <memory>
@@ -30,22 +35,50 @@ using helloworld::HelloRequest;
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::CallbackService {
+ public:
+  explicit GreeterServiceImpl(std::shared_ptr<prometheus::Registry> registry)
+      : request_counter_(
+            &prometheus::BuildCounter()
+                 .Name("grpc_requests_total")
+                 .Help("Total number of gRPC requests")
+                 .Register(*registry)
+                 .Add({{"method", "SayHello"}})),
+        duration_histogram_(
+            &prometheus::BuildHistogram()
+                 .Name("grpc_request_duration_seconds")
+                 .Help("gRPC request duration in seconds")
+                 .Register(*registry)
+                 .Add({{"method", "SayHello"}},
+                      std::vector<double>{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0})) {}
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
                                const HelloRequest* request,
                                HelloReply* reply) override {
+    auto start_time = std::chrono::steady_clock::now();
+    request_counter_->Increment();
     spdlog::info("Received request for name: {}", request->name());
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
 
     ServerUnaryReactor* reactor = context->DefaultReactor();
     reactor->Finish(Status::OK);
+    auto end_time = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end_time - start_time;
+    duration_histogram_->Observe(elapsed_seconds.count());
     return reactor;
   }
+ private:
+  prometheus::Counter* request_counter_;
+  prometheus::Histogram* duration_histogram_;
 };
 
 void RunServer(uint16_t port) {
   std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
-  GreeterServiceImpl service;
+  // Create Prometheus exposer on localhost:8124 and a registry
+  auto exposer = std::make_unique<prometheus::Exposer>("127.0.0.1:8124");
+  auto registry = std::make_shared<prometheus::Registry>();
+  exposer->RegisterCollectable(registry);
+
+  GreeterServiceImpl service(registry);
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
