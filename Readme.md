@@ -139,7 +139,7 @@ sudo cmake --install .
 Go to the build directory (CppGrpcDb2/build)
 
 ```bash
-cmake -DCMAKE_INSTALL_PREFIX=$HOME/.local --fresh .. 
+cmake -DCMAKE_INSTALL_PREFIX=$HOME/.local -DCMAKE_PREFIX_PATH=$HOME/.local --fresh .. 
 cmake --build .
 ```
 
