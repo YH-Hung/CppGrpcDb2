@@ -143,6 +143,8 @@ export MY_INSTALL_DIR=$HOME/.local
 
 git clone --recurse-submodules https://github.com/open-telemetry/opentelemetry-cpp
 cd opentelemetry-cpp
+git checkout v1.22.0
+
 mkdir -p build
 pushd build
 cmake -DBUILD_TESTING=OFF \
