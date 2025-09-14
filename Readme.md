@@ -32,6 +32,7 @@ Or like linux, build and install from source.
 
 - Download DB2 CLI driver from https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/
 - Extract and put clidriver folder under third_party/
+- Env: DYLD_LIBRARY_PATH=$HOME/clidriver/lib:$DYLD_LIBRARY_PATH
 
 ### OpenTelemetry Client
 
