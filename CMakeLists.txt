@@ -56,6 +56,20 @@ endforeach()
 
 include_directories(${generated_dir})
 
+add_library(string_transform_interceptor
+        src/string_transform_interceptor.cpp
+)
+
+target_include_directories(string_transform_interceptor
+        PUBLIC ${PROJECT_SOURCE_DIR}/include
+        PUBLIC ${generated_dir}
+)
+
+target_link_libraries(string_transform_interceptor
+        ${_PROTOBUF_LIBPROTOBUF}
+        spdlog::spdlog
+)
+
 foreach (_target greeter_callback_server greeter_server greeter_client)
     add_executable(${_target}
             src/${_target}.cpp
@@ -77,7 +91,47 @@ foreach (_target greeter_callback_server greeter_server greeter_client)
             spdlog::spdlog
             prometheus-cpp::pull
     )
+    
+    # Add string_transform_interceptor library only to greeter_callback_server
+    if(${_target} STREQUAL "greeter_callback_server")
+        target_link_libraries(${_target} string_transform_interceptor)
+    endif()
 endforeach ()
+
+# Add test for string interceptor (without DB2 dependency)
+add_executable(test_string_interceptor
+        src/test_string_interceptor.cpp
+)
+
+target_include_directories(test_string_interceptor
+        PUBLIC ${PROJECT_SOURCE_DIR}/include
+        PUBLIC ${generated_dir}
+)
+
+target_link_libraries(test_string_interceptor
+        ${PROTO_LIBS}
+        ${_PROTOBUF_LIBPROTOBUF}
+        string_transform_interceptor
+)
+
+# Add test server without DB2 dependency
+add_executable(greeter_callback_server_no_db2
+        src/greeter_callback_server_no_db2.cpp
+)
+
+target_include_directories(greeter_callback_server_no_db2
+        PUBLIC ${PROJECT_SOURCE_DIR}/include
+        PUBLIC ${generated_dir}
+)
+
+target_link_libraries(greeter_callback_server_no_db2
+        ${PROTO_LIBS}
+        ${_REFLECTION}
+        ${_GRPC_GRPCPP}
+        ${_PROTOBUF_LIBPROTOBUF}
+        spdlog::spdlog
+        string_transform_interceptor
+)
 
 # Enable testing
 enable_testing()

@@ -36,3 +36,4 @@
 /.idea
 
 /third_party
+.DS_Store

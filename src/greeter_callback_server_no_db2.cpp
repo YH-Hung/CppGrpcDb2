@@ -1,20 +1,12 @@
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
-#include <prometheus/exposer.h>
-#include <prometheus/registry.h>
-#include <prometheus/counter.h>
-#include <prometheus/histogram.h>
 #include <chrono>
 
 #include <iostream>
 #include <memory>
 #include <string>
 #include <algorithm>
-
-#include "absl/flags/flag.h"
-#include "absl/flags/parse.h"
-#include "absl/strings/str_format.h"
 
 #ifdef BAZEL_BUILD
 #include "examples/protos/helloworld.grpc.pb.h"
@@ -23,8 +15,6 @@
 #endif
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
-
-ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
 using grpc::CallbackServerContext;
 using grpc::Server;
@@ -35,55 +25,28 @@ using helloworld::Greeter;
 using helloworld::HelloReply;
 using helloworld::HelloRequest;
 
-// Logic and data behind the server's behavior.
-class GreeterServiceImpl final : public Greeter::CallbackService {
+class SimpleGreeterServiceImpl final : public Greeter::CallbackService {
  public:
-  explicit GreeterServiceImpl(std::shared_ptr<prometheus::Registry> registry)
-      : request_counter_(
-            &prometheus::BuildCounter()
-                 .Name("grpc_requests_total")
-                 .Help("Total number of gRPC requests")
-                 .Register(*registry)
-                 .Add({{"method", "SayHello"}})),
-        duration_histogram_(
-            &prometheus::BuildHistogram()
-                 .Name("grpc_request_duration_seconds")
-                 .Help("gRPC request duration in seconds")
-                 .Register(*registry)
-                 .Add({{"method", "SayHello"}},
-                      std::vector<double>{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0})) {}
+  SimpleGreeterServiceImpl() = default;
+      
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
                                const HelloRequest* request,
                                HelloReply* reply) override {
-    auto start_time = std::chrono::steady_clock::now();
-    request_counter_->Increment();
     spdlog::info("Received request for name: {}", request->name());
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
 
     ServerUnaryReactor* reactor = context->DefaultReactor();
     reactor->Finish(Status::OK);
-    auto end_time = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed_seconds = end_time - start_time;
-    duration_histogram_->Observe(elapsed_seconds.count());
     return reactor;
   }
- private:
-  prometheus::Counter* request_counter_;
-  prometheus::Histogram* duration_histogram_;
 };
 
 void RunServer(uint16_t port) {
-  std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
-  // Create Prometheus exposer on localhost:8124 and a registry
-  auto exposer = std::make_unique<prometheus::Exposer>("127.0.0.1:8124");
-  auto registry = std::make_shared<prometheus::Registry>();
-  exposer->RegisterCollectable(registry);
+  std::string server_address = "0.0.0.0:" + std::to_string(port);
 
-  // Create string transformation interceptor factory
   auto interceptor_factory = std::make_unique<StringTransformServerInterceptorFactory>();
   
-  // Set example transformation lambdas
   interceptor_factory->SetRequestTransform([](const std::string& input) -> std::string {
     spdlog::info("Request transform: Uppercasing '{}'", input);
     std::string result = input;
@@ -96,15 +59,12 @@ void RunServer(uint16_t port) {
     return "[TRANSFORMED] " + input;
   });
 
-  GreeterServiceImpl service(registry);
+  SimpleGreeterServiceImpl service;
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
   ServerBuilder builder;
-  // Listen on the given address without any authentication mechanism.
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-  // Register "service" as the instance through which we'll communicate with
-  // clients. In this case it corresponds to an *synchronous* service.
   builder.RegisterService(&service);
   
   // Register the string transformation interceptor factory
@@ -112,16 +72,17 @@ void RunServer(uint16_t port) {
   interceptors.push_back(std::move(interceptor_factory));
   builder.experimental().SetInterceptorCreators(std::move(interceptors));
   
-  // Finally assemble the server.
   std::unique_ptr<Server> server(builder.BuildAndStart());
   spdlog::info("Server listening on {}", server_address);
 
-  // Wait for the server to shutdown. Note that some other thread must be
-  // responsible for shutting down the server for this call to ever return.
   server->Wait();
 }
 
 int main(int argc, char** argv) {
-  RunServer(50051);
+  uint16_t port = 50051;
+  if (argc > 1) {
+    port = static_cast<uint16_t>(std::stoi(argv[1]));
+  }
+  RunServer(port);
   return 0;
 }
