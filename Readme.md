@@ -32,6 +32,7 @@ Or like linux, build and install from source.
 
 - Download DB2 CLI driver from https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/
 - Extract and put clidriver folder under third_party/
+- Env: DYLD_LIBRARY_PATH=$HOME/clidriver/lib:$DYLD_LIBRARY_PATH
 
 ### OpenTelemetry Client
 
@@ -139,7 +140,7 @@ sudo cmake --install .
 Go to the build directory (CppGrpcDb2/build)
 
 ```bash
-cmake -DCMAKE_INSTALL_PREFIX=$HOME/.local --fresh .. 
+cmake -DCMAKE_INSTALL_PREFIX=$HOME/.local -DCMAKE_PREFIX_PATH=$HOME/.local --fresh .. 
 cmake --build .
 ```
 
