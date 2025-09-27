@@ -23,6 +23,7 @@
 #endif
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
+#include "metrics_interceptor.h"
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -38,39 +39,19 @@ using helloworld::HelloRequest;
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::CallbackService {
  public:
-  explicit GreeterServiceImpl(std::shared_ptr<prometheus::Registry> registry)
-      : request_counter_(
-            &prometheus::BuildCounter()
-                 .Name("grpc_requests_total")
-                 .Help("Total number of gRPC requests")
-                 .Register(*registry)
-                 .Add({{"method", "SayHello"}})),
-        duration_histogram_(
-            &prometheus::BuildHistogram()
-                 .Name("grpc_request_duration_seconds")
-                 .Help("gRPC request duration in seconds")
-                 .Register(*registry)
-                 .Add({{"method", "SayHello"}},
-                      std::vector<double>{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0})) {}
+  GreeterServiceImpl() = default;
+
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
                                const HelloRequest* request,
                                HelloReply* reply) override {
-    auto start_time = std::chrono::steady_clock::now();
-    request_counter_->Increment();
     spdlog::info("Received request for name: {}", request->name());
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
 
     ServerUnaryReactor* reactor = context->DefaultReactor();
     reactor->Finish(Status::OK);
-    auto end_time = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed_seconds = end_time - start_time;
-    duration_histogram_->Observe(elapsed_seconds.count());
     return reactor;
   }
- private:
-  prometheus::Counter* request_counter_;
-  prometheus::Histogram* duration_histogram_;
 };
 
 void RunServer(uint16_t port) {
@@ -96,7 +77,7 @@ void RunServer(uint16_t port) {
     return "[TRANSFORMED] " + input;
   });
 
-  GreeterServiceImpl service(registry);
+  GreeterServiceImpl service;
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
@@ -107,9 +88,11 @@ void RunServer(uint16_t port) {
   // clients. In this case it corresponds to an *synchronous* service.
   builder.RegisterService(&service);
   
-  // Register the string transformation interceptor factory
+  // Register the string transformation interceptor factory and metrics factory
+  auto metrics_factory = std::make_unique<MetricsServerInterceptorFactory>(registry);
   std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
   interceptors.push_back(std::move(interceptor_factory));
+  interceptors.push_back(std::move(metrics_factory));
   builder.experimental().SetInterceptorCreators(std::move(interceptors));
   
   // Finally assemble the server.

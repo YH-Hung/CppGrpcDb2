@@ -60,7 +60,16 @@ add_library(string_transform_interceptor
         src/string_transform_interceptor.cpp
 )
 
+add_library(metrics_interceptor
+        src/metrics_interceptor.cpp
+)
+
 target_include_directories(string_transform_interceptor
+        PUBLIC ${PROJECT_SOURCE_DIR}/include
+        PUBLIC ${generated_dir}
+)
+
+target_include_directories(metrics_interceptor
         PUBLIC ${PROJECT_SOURCE_DIR}/include
         PUBLIC ${generated_dir}
 )
@@ -68,6 +77,11 @@ target_include_directories(string_transform_interceptor
 target_link_libraries(string_transform_interceptor
         ${_PROTOBUF_LIBPROTOBUF}
         spdlog::spdlog
+)
+
+target_link_libraries(metrics_interceptor
+        prometheus-cpp::pull
+        ${_GRPC_GRPCPP}
 )
 
 foreach (_target greeter_callback_server greeter_server greeter_client)
@@ -95,6 +109,11 @@ foreach (_target greeter_callback_server greeter_server greeter_client)
     # Add string_transform_interceptor library only to greeter_callback_server
     if(${_target} STREQUAL "greeter_callback_server")
         target_link_libraries(${_target} string_transform_interceptor)
+    endif()
+
+    # Add metrics_interceptor to servers that use it
+    if(${_target} STREQUAL "greeter_callback_server" OR ${_target} STREQUAL "greeter_server")
+        target_link_libraries(${_target} metrics_interceptor)
     endif()
 endforeach ()
 

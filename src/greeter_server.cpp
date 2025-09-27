@@ -9,6 +9,9 @@
 #include <chrono>
 #include "helloworld.pb.h"
 #include "helloworld.grpc.pb.h"
+#include "absl/strings/str_format.h"
+#include "metrics_interceptor.h"
+#include <vector>
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -20,38 +23,15 @@ using helloworld::HelloRequest;
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
-    public:
-    explicit GreeterServiceImpl(std::shared_ptr<prometheus::Registry> registry)
-        : request_counter_(
-              &prometheus::BuildCounter()
-                   .Name("grpc_requests_total")
-                   .Help("Total number of gRPC requests")
-                   .Register(*registry)
-                   .Add({{"method", "SayHello"}})),
-          duration_histogram_(
-              &prometheus::BuildHistogram()
-                   .Name("grpc_request_duration_seconds")
-                   .Help("gRPC request duration in seconds")
-                   .Register(*registry)
-                   .Add({{"method", "SayHello"}},
-                        std::vector<double>{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0})) {}
+public:
+    GreeterServiceImpl() = default;
 
-    Status SayHello(ServerContext* context, const HelloRequest* request,
-                          HelloReply* reply) override {
-        auto start_time = std::chrono::steady_clock::now();
-        request_counter_->Increment();
-
+    Status SayHello(ServerContext* /*context*/, const HelloRequest* request,
+                    HelloReply* reply) override {
         std::string prefix("Hello ");
         reply->set_message(prefix + request->name());
-
-        auto end_time = std::chrono::steady_clock::now();
-        std::chrono::duration<double> elapsed_seconds = end_time - start_time;
-        duration_histogram_->Observe(elapsed_seconds.count());
         return Status::OK;
     }
-  private:
-    prometheus::Counter* request_counter_;
-    prometheus::Histogram* duration_histogram_;
 };
 
 void RunServer(uint16_t port) {
@@ -61,7 +41,7 @@ void RunServer(uint16_t port) {
     auto registry = std::make_shared<prometheus::Registry>();
     exposer->RegisterCollectable(registry);
 
-    GreeterServiceImpl service(registry);
+    GreeterServiceImpl service;
 
     grpc::EnableDefaultHealthCheckService(true);
     grpc::reflection::InitProtoReflectionServerBuilderPlugin();
@@ -71,6 +51,13 @@ void RunServer(uint16_t port) {
     // Register "service" as the instance through which we'll communicate with
     // clients. In this case it corresponds to an *synchronous* service.
     builder.RegisterService(&service);
+    // Register metrics interceptor factory
+    {
+        auto metrics_factory = std::make_unique<MetricsServerInterceptorFactory>(registry);
+        std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
+        interceptors.push_back(std::move(metrics_factory));
+        builder.experimental().SetInterceptorCreators(std::move(interceptors));
+    }
     // Finally assemble the server.
     std::unique_ptr<Server> server(builder.BuildAndStart());
     std::cout << "Server listening on " << server_address << std::endl;
