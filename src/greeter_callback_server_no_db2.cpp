@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <algorithm>
+#include "byte_logging.h"
 
 #ifdef BAZEL_BUILD
 #include "examples/protos/helloworld.grpc.pb.h"
@@ -33,6 +34,10 @@ class SimpleGreeterServiceImpl final : public Greeter::CallbackService {
                                const HelloRequest* request,
                                HelloReply* reply) override {
     spdlog::info("Received request for name: {}", request->name());
+
+    // Log the raw bytes of the name in hexadecimal (space-delimited)
+    util::LogBytesHexSpaceDelimited(request->name(), "Name bytes (hex)");
+
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
 

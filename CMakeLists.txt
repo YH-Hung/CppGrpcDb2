@@ -140,6 +140,7 @@ target_link_libraries(test_string_interceptor
 # Add test server without DB2 dependency
 add_executable(greeter_callback_server_no_db2
         src/greeter_callback_server_no_db2.cpp
+        src/byte_logging.cpp
 )
 
 target_include_directories(greeter_callback_server_no_db2
