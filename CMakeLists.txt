@@ -15,6 +15,9 @@ include(cmake/spdlog.cmake)
 # Resolve prometheus library
 include(cmake/prometheus.cmake)
 
+# Resolve utf8ansi library (installed under $HOME/.local by default)
+include(cmake/utf8ansi.cmake)
+
 # Get proto files
 file(GLOB PROTO_FILES "${CMAKE_SOURCE_DIR}/protos/*.proto")
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/gen_proto")
@@ -77,6 +80,7 @@ target_include_directories(metrics_interceptor
 target_link_libraries(string_transform_interceptor
         ${_PROTOBUF_LIBPROTOBUF}
         spdlog::spdlog
+        utf8ansi::utf8ansi
 )
 
 target_link_libraries(metrics_interceptor
