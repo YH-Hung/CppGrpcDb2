@@ -16,6 +16,7 @@
 #endif
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
+#include "utf8ansi.h"
 
 using grpc::CallbackServerContext;
 using grpc::Server;
@@ -53,15 +54,23 @@ void RunServer(uint16_t port) {
   auto interceptor_factory = std::make_unique<StringTransformServerInterceptorFactory>();
   
   interceptor_factory->SetRequestTransform([](const std::string& input) -> std::string {
-    spdlog::info("Request transform: Uppercasing '{}'", input);
-    std::string result = input;
-    std::transform(result.begin(), result.end(), result.begin(), ::toupper);
-    return result;
+    spdlog::info("Request transform: utf8 -> big5 for '{}'", input);
+    try {
+      return utf8ansi::utf8_to_big5(input);
+    } catch (const std::exception& e) {
+      spdlog::error("utf8_to_big5 failed: {}", e.what());
+      return input; // fallback to original
+    }
   });
   
   interceptor_factory->SetResponseTransform([](const std::string& input) -> std::string {
-    spdlog::info("Response transform: Adding prefix to '{}'", input);
-    return "[TRANSFORMED] " + input;
+    spdlog::info("Response transform: big5 -> utf8");
+    try {
+      return utf8ansi::big5_to_utf8(input);
+    } catch (const std::exception& e) {
+      spdlog::error("big5_to_utf8 failed: {}", e.what());
+      return input; // fallback to original
+    }
   });
 
   SimpleGreeterServiceImpl service;

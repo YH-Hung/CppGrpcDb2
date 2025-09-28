@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     // InsecureChannelCredentials()).
     GreeterClient greeter(
         grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
-    std::string user("world");
+    std::string user("賴柔瑤");
     std::string reply = greeter.SayHello(user);
     std::cout << "Greeter received: " << reply << std::endl;
 

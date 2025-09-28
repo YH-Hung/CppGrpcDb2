@@ -155,6 +155,7 @@ target_link_libraries(greeter_callback_server_no_db2
         ${_PROTOBUF_LIBPROTOBUF}
         spdlog::spdlog
         string_transform_interceptor
+        utf8ansi::utf8ansi
 )
 
 # Enable testing
