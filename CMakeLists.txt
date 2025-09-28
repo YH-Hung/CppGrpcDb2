@@ -88,7 +88,7 @@ target_link_libraries(metrics_interceptor
         ${_GRPC_GRPCPP}
 )
 
-foreach (_target greeter_callback_server greeter_server greeter_client)
+foreach (_target greeter_callback_server greeter_server greeter_client greeter_girl_client)
     add_executable(${_target}
             src/${_target}.cpp
     )

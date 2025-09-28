@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.hellogirl";
+option java_outer_classname = "HelloGirlProto";
+option objc_class_prefix = "HLG";
+
+package hellogirl;
+
+// The greeting service definition (based on helloworld.proto).
+service GirlGreeter {
+  // Sends a greeting
+  rpc SayHello (HelloGirlRequest) returns (HelloGirlReply) {}
+
+  // Server streaming example
+  rpc SayHelloStreamReply (HelloGirlRequest) returns (stream HelloGirlReply) {}
+
+  // Bidirectional streaming example
+  rpc SayHelloBidiStream (stream HelloGirlRequest) returns (stream HelloGirlReply) {}
+}
+
+// The request message containing the user's name, spouse, and the first round number.
+message HelloGirlRequest {
+  string name = 1;
+  string spouse = 2;      // additional field
+  int32 first_round = 3;   // additional field
+}
+
+// The response message containing the greetings, marriage info, and size.
+message HelloGirlReply {
+  string message = 1;
+  string marriage = 2;    // additional field
+  int32 size = 3;         // additional field
+}

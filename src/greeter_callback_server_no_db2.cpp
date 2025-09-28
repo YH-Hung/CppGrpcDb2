@@ -10,9 +10,9 @@
 #include "byte_logging.h"
 
 #ifdef BAZEL_BUILD
-#include "examples/protos/helloworld.grpc.pb.h"
+#include "examples/protos/hello_girl.grpc.pb.h"
 #else
-#include "helloworld.grpc.pb.h"
+#include "hello_girl.grpc.pb.h"
 #endif
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
@@ -23,24 +23,31 @@ using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerUnaryReactor;
 using grpc::Status;
-using helloworld::Greeter;
-using helloworld::HelloReply;
-using helloworld::HelloRequest;
+using hellogirl::GirlGreeter;
+using hellogirl::HelloGirlReply;
+using hellogirl::HelloGirlRequest;
 
-class SimpleGreeterServiceImpl final : public Greeter::CallbackService {
+class SimpleGreeterServiceImpl final : public GirlGreeter::CallbackService {
  public:
   SimpleGreeterServiceImpl() = default;
       
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
-                               const HelloRequest* request,
-                               HelloReply* reply) override {
+                               const HelloGirlRequest* request,
+                               HelloGirlReply* reply) override {
     spdlog::info("Received request for name: {}", request->name());
 
     // Log the raw bytes of the name in hexadecimal (space-delimited)
     util::LogBytesHexSpaceDelimited(request->name(), "Name bytes (hex)");
+    // Also log the raw bytes of the spouse in hexadecimal (space-delimited)
+    util::LogBytesHexSpaceDelimited(request->spouse(), "Spouse bytes (hex)");
 
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
+
+    // Compose additional fields as requested
+    std::string marriage = request->name() + " is married with " + request->spouse();
+    reply->set_marriage(marriage);
+    reply->set_size(request->first_round() + 1);
 
     ServerUnaryReactor* reactor = context->DefaultReactor();
     reactor->Finish(Status::OK);
