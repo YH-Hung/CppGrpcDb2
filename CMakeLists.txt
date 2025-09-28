@@ -1,7 +1,14 @@
 cmake_minimum_required(VERSION 3.31)
-project(CppGrpcDb2)
+project(CppGrpcDb2 VERSION 1.0.0 LANGUAGES CXX)
 
+# Set global C++ standard
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# ==============================================================================
+# Dependency Resolution
+# ==============================================================================
 
 # Resolve DB2 CLI Driver
 include(cmake/db2.cmake)
@@ -18,12 +25,32 @@ include(cmake/prometheus.cmake)
 # Resolve utf8ansi library (installed under $HOME/.local by default)
 include(cmake/utf8ansi.cmake)
 
-# Get proto files
-file(GLOB PROTO_FILES "${CMAKE_SOURCE_DIR}/protos/*.proto")
-set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/gen_proto")
-file(MAKE_DIRECTORY ${generated_dir})
+# Include common helper functions
+include(cmake/common.cmake)
 
-# Generate protobuf files
+# Validate required directories exist
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/src")
+    message(FATAL_ERROR "Source directory not found: ${CMAKE_SOURCE_DIR}/src")
+endif()
+
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/include")
+    message(FATAL_ERROR "Include directory not found: ${CMAKE_SOURCE_DIR}/include")
+endif()
+
+# ==============================================================================
+# Protobuf and gRPC Code Generation
+# ==============================================================================
+
+# Get proto files and validate they exist
+file(GLOB PROTO_FILES "${CMAKE_SOURCE_DIR}/protos/*.proto")
+if(NOT PROTO_FILES)
+    message(FATAL_ERROR "No .proto files found in ${CMAKE_SOURCE_DIR}/protos/")
+endif()
+
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/gen_proto")
+file(MAKE_DIRECTORY "${generated_dir}")
+
+# Generate protobuf files for each proto file
 foreach(proto ${PROTO_FILES})
     get_filename_component(proto_name ${proto} NAME_WE)
     get_filename_component(proto_path ${proto} PATH)
@@ -34,154 +61,174 @@ foreach(proto ${PROTO_FILES})
     set(grpc_hdrs "${generated_dir}/${proto_name}.grpc.pb.h")
 
     add_custom_command(
-            OUTPUT ${proto_srcs} ${proto_hdrs} ${grpc_srcs} ${grpc_hdrs}
-            COMMAND ${_PROTOBUF_PROTOC}
-            ARGS --grpc_out=${generated_dir}
-            --cpp_out=${generated_dir}
-            -I${proto_path}
-            --plugin=protoc-gen-grpc=${_GRPC_CPP_PLUGIN_EXECUTABLE}
-            ${proto}
-            DEPENDS ${proto}
-            COMMENT "Generating gRPC and Protobuf files for ${proto}"
+        OUTPUT ${proto_srcs} ${proto_hdrs} ${grpc_srcs} ${grpc_hdrs}
+        COMMAND ${_PROTOBUF_PROTOC}
+        ARGS --grpc_out=${generated_dir}
+             --cpp_out=${generated_dir}
+             -I${proto_path}
+             --plugin=protoc-gen-grpc=${_GRPC_CPP_PLUGIN_EXECUTABLE}
+             ${proto}
+        DEPENDS ${proto}
+        COMMENT "Generating gRPC and Protobuf files for ${proto_name}"
     )
 
+    # Create proto library with modern target properties
     add_library(${proto_name}_proto
-            ${grpc_srcs}
-            ${grpc_hdrs}
-            ${proto_srcs}
-            ${proto_hdrs})
+        ${grpc_srcs}
+        ${grpc_hdrs}
+        ${proto_srcs}
+        ${proto_hdrs}
+    )
+
     target_link_libraries(${proto_name}_proto
-            ${_REFLECTION}
-            ${_GRPC_GRPCPP})
+        PUBLIC ${_REFLECTION}
+        PUBLIC ${_GRPC_GRPCPP}
+    )
+
+    target_include_directories(${proto_name}_proto
+        PUBLIC "${generated_dir}"
+    )
+
+    # Set C++20 standard for proto libraries
+    target_compile_features(${proto_name}_proto PUBLIC cxx_std_20)
 
     list(APPEND PROTO_LIBS ${proto_name}_proto)
 endforeach()
 
-include_directories(${generated_dir})
+# ==============================================================================
+# Interceptor Libraries
+# ==============================================================================
 
+# String transform interceptor library
 add_library(string_transform_interceptor
-        src/string_transform_interceptor.cpp
-)
-
-add_library(metrics_interceptor
-        src/metrics_interceptor.cpp
+    src/string_transform_interceptor.cpp
 )
 
 target_include_directories(string_transform_interceptor
-        PUBLIC ${PROJECT_SOURCE_DIR}/include
-        PUBLIC ${generated_dir}
-)
-
-target_include_directories(metrics_interceptor
-        PUBLIC ${PROJECT_SOURCE_DIR}/include
-        PUBLIC ${generated_dir}
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PUBLIC "${generated_dir}"
 )
 
 target_link_libraries(string_transform_interceptor
-        ${_PROTOBUF_LIBPROTOBUF}
-        spdlog::spdlog
-        utf8ansi::utf8ansi
+    PUBLIC ${_PROTOBUF_LIBPROTOBUF}
+    PUBLIC spdlog::spdlog
+    PUBLIC utf8ansi::utf8ansi
+)
+
+target_compile_features(string_transform_interceptor PUBLIC cxx_std_20)
+
+# Metrics interceptor library
+add_library(metrics_interceptor
+    src/metrics_interceptor.cpp
+)
+
+target_include_directories(metrics_interceptor
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PUBLIC "${generated_dir}"
 )
 
 target_link_libraries(metrics_interceptor
-        prometheus-cpp::pull
-        ${_GRPC_GRPCPP}
+    PUBLIC prometheus-cpp::pull
+    PUBLIC ${_GRPC_GRPCPP}
 )
 
-foreach (_target greeter_callback_server greeter_server greeter_client greeter_girl_client)
-    add_executable(${_target}
-            src/${_target}.cpp
-    )
+target_compile_features(metrics_interceptor PUBLIC cxx_std_20)
 
-    target_include_directories(${_target}
-            PUBLIC ${PROJECT_SOURCE_DIR}/include
-            PUBLIC ${generated_dir}
-            PUBLIC ${DB2_INCLUDE_DIR}
-    )
+# ==============================================================================
+# Main Executable Targets
+# ==============================================================================
 
-    # db2 means libdb2, cmake will resolve the naming convention
-    target_link_libraries(${_target}
-            ${PROTO_LIBS}
-            ${_REFLECTION}
-            ${_GRPC_GRPCPP}
-            ${_PROTOBUF_LIBPROTOBUF}
-            db2
-            spdlog::spdlog
-            prometheus-cpp::pull
-    )
-    
-    # Add string_transform_interceptor library only to greeter_callback_server
-    if(${_target} STREQUAL "greeter_callback_server")
-        target_link_libraries(${_target} string_transform_interceptor)
+# Define executable targets and their specific configurations
+set(GRPC_TARGETS
+    greeter_callback_server
+    greeter_server
+    greeter_client
+    greeter_girl_client
+)
+
+foreach(target_name ${GRPC_TARGETS})
+    # Create the base gRPC executable
+    create_grpc_executable(${target_name} "src/${target_name}.cpp")
+
+    # Add DB2 support to all targets
+    add_db2_support(${target_name})
+
+    # Add interceptor support based on target type
+    if(target_name STREQUAL "greeter_callback_server")
+        add_interceptor_support(${target_name} STRING_TRANSFORM METRICS)
+    elseif(target_name STREQUAL "greeter_server")
+        add_interceptor_support(${target_name} METRICS)
     endif()
+endforeach()
 
-    # Add metrics_interceptor to servers that use it
-    if(${_target} STREQUAL "greeter_callback_server" OR ${_target} STREQUAL "greeter_server")
-        target_link_libraries(${_target} metrics_interceptor)
-    endif()
-endforeach ()
+# ==============================================================================
+# Test and Utility Executables
+# ==============================================================================
 
-# Add test for string interceptor (without DB2 dependency)
+# Test for string interceptor (without DB2 dependency)
 add_executable(test_string_interceptor
-        src/test_string_interceptor.cpp
+    src/test_string_interceptor.cpp
 )
 
 target_include_directories(test_string_interceptor
-        PUBLIC ${PROJECT_SOURCE_DIR}/include
-        PUBLIC ${generated_dir}
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+    PRIVATE "${generated_dir}"
 )
 
 target_link_libraries(test_string_interceptor
-        ${PROTO_LIBS}
-        ${_PROTOBUF_LIBPROTOBUF}
-        string_transform_interceptor
+    PRIVATE ${PROTO_LIBS}
+    PRIVATE ${_PROTOBUF_LIBPROTOBUF}
+    PRIVATE string_transform_interceptor
 )
 
-# Add test server without DB2 dependency
+target_compile_features(test_string_interceptor PRIVATE cxx_std_20)
+
+# Test server without DB2 dependency
 add_executable(greeter_callback_server_no_db2
-        src/greeter_callback_server_no_db2.cpp
-        src/byte_logging.cpp
+    src/greeter_callback_server_no_db2.cpp
+    src/byte_logging.cpp
 )
 
 target_include_directories(greeter_callback_server_no_db2
-        PUBLIC ${PROJECT_SOURCE_DIR}/include
-        PUBLIC ${generated_dir}
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+    PRIVATE "${generated_dir}"
 )
 
 target_link_libraries(greeter_callback_server_no_db2
-        ${PROTO_LIBS}
-        ${_REFLECTION}
-        ${_GRPC_GRPCPP}
-        ${_PROTOBUF_LIBPROTOBUF}
-        spdlog::spdlog
-        string_transform_interceptor
-        utf8ansi::utf8ansi
+    PRIVATE ${PROTO_LIBS}
+    PRIVATE ${_REFLECTION}
+    PRIVATE ${_GRPC_GRPCPP}
+    PRIVATE ${_PROTOBUF_LIBPROTOBUF}
+    PRIVATE spdlog::spdlog
+    PRIVATE string_transform_interceptor
+    PRIVATE utf8ansi::utf8ansi
 )
 
-# Enable testing
+target_compile_features(greeter_callback_server_no_db2 PRIVATE cxx_std_20)
+
+# ==============================================================================
+# Unit Tests
+# ==============================================================================
+
+# Enable testing framework
 enable_testing()
 include(cmake/gtest.cmake)
 
-# Create library
+# MSVC compatibility library
 add_library(msvc STATIC src/msvc/msvc.cpp)
+target_include_directories(msvc
+    PUBLIC src/msvc
+)
+target_compile_features(msvc PUBLIC cxx_std_20)
 
-# Create test executable
-foreach (_test_target test_strset test_strupr test_stricmp test_max)
-    add_executable(${_test_target} tests/msvc/${_test_target}.cpp)
-    target_include_directories(${_test_target} PUBLIC src/msvc)
-    target_link_libraries(${_test_target} GTest::gtest GTest::gtest_main msvc)
-    add_test(NAME ${_test_target} COMMAND ${_test_target})
-endforeach ()
+# MSVC library test targets
+set(MSVC_TEST_TARGETS
+    test_strset
+    test_strupr
+    test_stricmp
+    test_max
+)
 
-# Add DB2 environment variables to the build
-#add_custom_target(set_db2_env
-#    COMMAND ${CMAKE_COMMAND} -E env
-#    "DB2INSTANCE=db2inst1"
-#    "DB2INSTDEF=db2inst1"
-#    "DB2PATH=${DB2_CLI_DRIVER_DIR}"
-#    "DB2HOME=${DB2_CLI_DRIVER_DIR}"
-#    "DB2DIR=${DB2_CLI_DRIVER_DIR}"
-#    "LD_LIBRARY_PATH=${DB2_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
-#    "PATH=${DB2_CLI_DRIVER_DIR}/bin:$ENV{PATH}"
-#    COMMENT "Setting up DB2 environment variables"
-#)
+foreach(test_target ${MSVC_TEST_TARGETS})
+    create_test_executable(${test_target} "tests/msvc/${test_target}.cpp")
+endforeach()
