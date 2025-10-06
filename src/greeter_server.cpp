@@ -26,8 +26,12 @@ class GreeterServiceImpl final : public Greeter::Service {
 public:
     GreeterServiceImpl() = default;
 
-    Status SayHello(ServerContext* /*context*/, const HelloRequest* request,
+    Status SayHello(ServerContext* context, const HelloRequest* request,
                     HelloReply* reply) override {
+        // Check cancellation before preparing the reply
+        if (context && context->IsCancelled()) {
+            return Status(grpc::StatusCode::CANCELLED, "Request cancelled");
+        }
         std::string prefix("Hello ");
         reply->set_message(prefix + request->name());
         return Status::OK;

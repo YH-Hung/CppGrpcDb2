@@ -45,10 +45,18 @@ class GreeterServiceImpl final : public Greeter::CallbackService {
                                const HelloRequest* request,
                                HelloReply* reply) override {
     spdlog::info("Received request for name: {}", request->name());
+
+    ServerUnaryReactor* reactor = context->DefaultReactor();
+    // Check cancellation before doing any reply work
+    if (context->IsCancelled()) {
+      spdlog::warn("Request was cancelled by client before processing.");
+      reactor->Finish(Status(grpc::StatusCode::CANCELLED, "Request cancelled"));
+      return reactor;
+    }
+
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
 
-    ServerUnaryReactor* reactor = context->DefaultReactor();
     reactor->Finish(Status::OK);
     return reactor;
   }
