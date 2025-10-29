@@ -65,6 +65,23 @@ class SimpleGreeterServiceImpl final : public GirlGreeter::CallbackService {
   }
 };
 
+void signal_waiter(grpc::Server* server) {
+  sigset_t sigset;
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGINT);
+  sigaddset(&sigset, SIGTERM);
+
+  int sig;
+  // Wait until a signal is received
+  sigwait(&sigset, &sig);
+
+  spdlog::warn("Received termination signal, shutting down gRPC server...");
+
+  // Gracefully shut down — allow active RPCs to finish
+  auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+  server->Shutdown(deadline);
+}
+
 void RunServer(uint16_t port) {
   std::string server_address = "0.0.0.0:" + std::to_string(port);
 
@@ -102,35 +119,24 @@ void RunServer(uint16_t port) {
   std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
   interceptors.push_back(std::move(interceptor_factory));
   builder.experimental().SetInterceptorCreators(std::move(interceptors));
-  
+
+  // Block SIGINT/SIGTERM in main thread, will handle them in signal_waiter
+  sigset_t sigset;
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGINT);
+  sigaddset(&sigset, SIGTERM);
+  pthread_sigmask(SIG_BLOCK, &sigset, nullptr);
+
   std::unique_ptr<Server> server(builder.BuildAndStart());
   spdlog::info("Server listening on {}", server_address);
 
-  // Block SIGINT/SIGTERM in this thread and spawn a waiter thread
-  sigset_t set;
-  sigemptyset(&set);
-  sigaddset(&set, SIGINT);
-  sigaddset(&set, SIGTERM);
-  int mask_rc = pthread_sigmask(SIG_BLOCK, &set, nullptr);
-  if (mask_rc != 0) {
-    spdlog::warn("pthread_sigmask failed with code {}", mask_rc);
-  }
-
-  std::thread signal_thread([&server, set]() mutable {
-    int sig = 0;
-    int ret = sigwait(&set, &sig);
-    if (ret == 0) {
-      spdlog::info("Signal {} received. Initiating graceful shutdown...", sig);
-      auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(10);
-      server->Shutdown(deadline); // allow in-flight RPCs up to 10s to finish
-    } else {
-      spdlog::error("sigwait failed with code {}", ret);
-    }
-  });
+  // Thread dedicated to signal waiting
+  std::thread watcher(signal_waiter, server.get());
 
   // Wait until shutdown is requested and all RPCs finish or deadline passes
   server->Wait();
-  signal_thread.join();
+  watcher.join();
+
   spdlog::info("Server stopped.");
 }
 
