@@ -142,3 +142,55 @@ int main(int argc, char** argv) {
   RunServer(port);
   return 0;
 }
+
+// #include <grpcpp/grpcpp.h>
+// #include <csignal>
+// #include <thread>
+// #include <atomic>
+// #include <iostream>
+//
+// std::atomic<bool> stop_requested{false};
+//
+// void signal_waiter(grpc::Server* server) {
+//   sigset_t sigset;
+//   sigemptyset(&sigset);
+//   sigaddset(&sigset, SIGINT);
+//   sigaddset(&sigset, SIGTERM);
+//
+//   int sig;
+//   // Wait until a signal is received
+//   sigwait(&sigset, &sig);
+//
+//   std::cout << "Received termination signal, shutting down gRPC server..." << std::endl;
+//
+//   // Gracefully shut down — allow active RPCs to finish
+//   auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+//   server->Shutdown(deadline);
+//   stop_requested = true;
+// }
+//
+// int main() {
+//   // Block SIGINT/SIGTERM in main thread, will handle them in signal_waiter
+//   sigset_t sigset;
+//   sigemptyset(&sigset);
+//   sigaddset(&sigset, SIGINT);
+//   sigaddset(&sigset, SIGTERM);
+//   pthread_sigmask(SIG_BLOCK, &sigset, nullptr);
+//
+//   grpc::ServerBuilder builder;
+//   builder.AddListeningPort("0.0.0.0:50051", grpc::InsecureServerCredentials());
+//   // builder.RegisterService(&service); // your service
+//
+//   std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+//   std::cout << "Server started, waiting for SIGTERM..." << std::endl;
+//
+//   // Thread dedicated to signal waiting
+//   std::thread watcher(signal_waiter, server.get());
+//
+//   // Main thread blocks until Shutdown() is called
+//   server->Wait();
+//
+//   watcher.join();
+//   std::cout << "Server exited cleanly." << std::endl;
+//   return 0;
+// }
