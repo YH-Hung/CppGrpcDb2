@@ -39,6 +39,14 @@ class SimpleGreeterServiceImpl final : public GirlGreeter::CallbackService {
                                HelloGirlReply* reply) override {
     spdlog::info("Received request for name: {}", request->name());
 
+    ServerUnaryReactor* reactor = context->DefaultReactor();
+    // Check cancellation before doing any reply work
+    if (context->IsCancelled()) {
+      spdlog::warn("Request was cancelled by client before processing.");
+      reactor->Finish(Status(grpc::StatusCode::CANCELLED, "Request cancelled"));
+      return reactor;
+    }
+
     // Log the raw bytes of the name in hexadecimal (space-delimited)
     util::LogBytesHexSpaceDelimited(request->name(), "Name bytes (hex)");
     // Also log the raw bytes of the spouse in hexadecimal (space-delimited)
@@ -52,7 +60,6 @@ class SimpleGreeterServiceImpl final : public GirlGreeter::CallbackService {
     reply->set_marriage(marriage);
     reply->set_size(request->first_round() + 1);
 
-    ServerUnaryReactor* reactor = context->DefaultReactor();
     reactor->Finish(Status::OK);
     return reactor;
   }
