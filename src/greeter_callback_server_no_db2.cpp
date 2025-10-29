@@ -2,6 +2,9 @@
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
 #include <chrono>
+#include <thread>
+#include <signal.h>
+#include <pthread.h>
 
 #include <iostream>
 #include <memory>
@@ -96,7 +99,32 @@ void RunServer(uint16_t port) {
   std::unique_ptr<Server> server(builder.BuildAndStart());
   spdlog::info("Server listening on {}", server_address);
 
+  // Block SIGINT/SIGTERM in this thread and spawn a waiter thread
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTERM);
+  int mask_rc = pthread_sigmask(SIG_BLOCK, &set, nullptr);
+  if (mask_rc != 0) {
+    spdlog::warn("pthread_sigmask failed with code {}", mask_rc);
+  }
+
+  std::thread signal_thread([&server, set]() mutable {
+    int sig = 0;
+    int ret = sigwait(&set, &sig);
+    if (ret == 0) {
+      spdlog::info("Signal {} received. Initiating graceful shutdown...", sig);
+      auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(10);
+      server->Shutdown(deadline); // allow in-flight RPCs up to 10s to finish
+    } else {
+      spdlog::error("sigwait failed with code {}", ret);
+    }
+  });
+
+  // Wait until shutdown is requested and all RPCs finish or deadline passes
   server->Wait();
+  signal_thread.join();
+  spdlog::info("Server stopped.");
 }
 
 int main(int argc, char** argv) {
