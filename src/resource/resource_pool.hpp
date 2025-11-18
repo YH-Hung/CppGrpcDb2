@@ -284,7 +284,20 @@ private:
       }
 
       if (!idle_.empty()) {
-        return make_shared_from_idle_locked(lk);
+        // Note: make_shared_from_idle_locked may return nullptr in rare races
+        // (e.g., all idle are invalid and capacity is immediately consumed by
+        // another waiter while we're validating). For blocking acquire we must
+        // not propagate nullptr; instead, continue the loop to either wait or
+        // retry until timeout/shutdown.
+        auto sp = make_shared_from_idle_locked(lk);
+        if (sp) {
+          return sp;
+        }
+        // Ensure we hold the lock before next loop iteration
+        if (!lk.owns_lock()) lk.lock();
+        // Fall through to the loop head; conditions will be re-evaluated and
+        // we will wait if necessary according to the deadline.
+        continue;
       }
       if (total_ < max_size_) {
         ++total_;
