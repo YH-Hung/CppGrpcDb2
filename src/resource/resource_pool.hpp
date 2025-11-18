@@ -85,8 +85,22 @@ public:
   // Try to acquire until a specific time_point; returns nullptr on timeout.
   template <class ClockT, class Dur>
   SharedPtr acquire_until(const std::chrono::time_point<ClockT, Dur>& deadline) {
-    const auto tp = std::chrono::time_point_cast<Clock::duration>(deadline);
-    return acquire_until(tp);
+    // Convert an arbitrary clock deadline to this pool's steady_clock deadline
+    using OtherTP = std::chrono::time_point<ClockT, Dur>;
+    if (deadline == OtherTP::max()) {
+      return acquire_until(Clock::time_point::max());
+    }
+
+    const auto now_other = ClockT::now();
+    // remaining may be negative; treat as zero waiting time
+    const auto remaining_other = deadline - now_other;
+    if (remaining_other <= typename OtherTP::duration::zero()) {
+      // No time left: perform an immediate attempt without waiting
+      return acquire_until(Clock::now());
+    }
+
+    const auto remaining = std::chrono::duration_cast<Clock::duration>(remaining_other);
+    return acquire_until(Clock::now() + remaining);
   }
 
   // Non-throwing immediate try_acquire; returns nullptr if not available and cannot create.
@@ -160,35 +174,60 @@ private:
 
   SharedPtr make_shared_from_idle_locked(std::unique_lock<std::mutex>& lk) {
     // Pre-condition: lk holds the mutex and idle_ is non-empty
-    std::unique_ptr<T> u = std::move(idle_.back());
-    idle_.pop_back();
+    // Iterate to skip any invalid idle resources without risking deep recursion
+    while (true) {
+      std::unique_ptr<T> u = std::move(idle_.back());
+      idle_.pop_back();
 
-    if (validator_) {
-      // Quick validation check before returning
-      if (!validator_(*u)) {
-        // Drop invalid; decrement total and try again (recursively) if possible
+      if (!validator_) {
+        return make_shared_from_unique_unlocked(std::move(u), lk);
+      }
+
+      // Validate outside the mutex to avoid potential deadlocks and long holds
+      auto validator_copy = validator_;
+      T* raw = u.get();
+      lk.unlock();
+      bool ok = false;
+      try {
+        ok = validator_copy ? validator_copy(*raw) : true;
+      } catch (...) {
+        ok = false; // Treat validator exceptions as invalid resource
+      }
+      lk.lock();
+
+      if (shutting_down_) {
+        // Pool is shutting down: discard resource
+        // Decrement total_ and destroy outside the lock
         --total_;
-        // Destroy outside lock
-        T* raw = u.release();
+        std::unique_ptr<T> to_destroy = std::move(u);
         lk.unlock();
-        delete raw;
-        // Re-lock and attempt again
-        lk.lock();
-        if (shutting_down_) return nullptr;
-        if (!idle_.empty()) {
-          return make_shared_from_idle_locked(lk);
-        }
-        if (total_ < max_size_) {
-          ++total_;
-          lk.unlock();
-          return make_shared_from_factory();
-        }
-        // No resource to return now
+        to_destroy.reset();
+        cv_.notify_one();
         return nullptr;
       }
-    }
 
-    return make_shared_from_unique_unlocked(std::move(u), lk);
+      if (ok) {
+        return make_shared_from_unique_unlocked(std::move(u), lk);
+      }
+
+      // Not ok: discard and adjust counters, then try next option
+      --total_;
+      std::unique_ptr<T> to_destroy = std::move(u);
+      lk.unlock();
+      to_destroy.reset();
+      cv_.notify_one();
+      lk.lock();
+
+      if (!idle_.empty()) {
+        continue; // check next idle resource
+      }
+      if (total_ < max_size_) {
+        ++total_;
+        lk.unlock();
+        return make_shared_from_factory();
+      }
+      return nullptr; // nothing to return now
+    }
   }
 
   SharedPtr make_shared_from_factory() {
@@ -213,15 +252,23 @@ private:
       cv_.notify_one();
       throw std::runtime_error("ResourcePool factory returned null");
     }
-    if (validator_ && !validator_(*u)) {
-      // Created resource is invalid; destroy and roll back, then throw
-      u.reset();
-      {
-        std::lock_guard<std::mutex> lk(mtx_);
-        --total_;
+    if (validator_) {
+      bool ok = false;
+      try {
+        ok = validator_(*u);
+      } catch (...) {
+        ok = false; // Treat exception as invalid resource
       }
-      cv_.notify_one();
-      throw std::runtime_error("ResourcePool validator rejected created resource");
+      if (!ok) {
+        // Created resource is invalid; destroy and roll back, then throw
+        u.reset();
+        {
+          std::lock_guard<std::mutex> lk(mtx_);
+          --total_;
+        }
+        cv_.notify_one();
+        throw std::runtime_error("ResourcePool validator rejected created resource");
+      }
     }
 
     auto self = this->shared_from_this();
@@ -261,6 +308,17 @@ private:
   // Return raw pointer back to pool (called by SharedPtr deleter)
   void release_raw(T* p) noexcept {
     std::unique_ptr<T> u(p);
+    bool valid = true;
+    // Validate outside the mutex to avoid deadlocks; catch exceptions
+    auto validator_copy = validator_;
+    if (validator_copy) {
+      try {
+        valid = validator_copy(*u);
+      } catch (...) {
+        valid = false;
+      }
+    }
+
     bool notify = false;
     {
       std::lock_guard<std::mutex> lk(mtx_);
@@ -268,7 +326,7 @@ private:
         // Drop resource, reduce total
         --total_;
         notify = true;
-      } else if (validator_ && !validator_(*u)) {
+      } else if (!valid) {
         // Discard invalid; reduce total
         --total_;
         notify = true;
