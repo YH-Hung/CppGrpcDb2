@@ -37,3 +37,5 @@
 
 /third_party
 .DS_Store
+
+/cmake-build-verify

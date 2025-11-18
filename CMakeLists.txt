@@ -135,6 +135,24 @@ target_link_libraries(metrics_interceptor
 target_compile_features(metrics_interceptor PUBLIC cxx_std_20)
 
 # ==============================================================================
+# DB2 Wrapper Library
+# ==============================================================================
+
+add_library(db2_wrapper
+    src/db2/db2.cpp
+)
+
+target_include_directories(db2_wrapper
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(db2_wrapper
+    PUBLIC DB2::db2
+)
+
+target_compile_features(db2_wrapper PUBLIC cxx_std_20)
+
+# ==============================================================================
 # Main Executable Targets
 # ==============================================================================
 

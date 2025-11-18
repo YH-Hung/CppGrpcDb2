@@ -24,8 +24,9 @@ endfunction()
 
 # Function to add DB2 support to a target
 function(add_db2_support target_name)
+    # Link against our DB2 wrapper (which itself links DB2::db2)
     target_link_libraries(${target_name}
-        PRIVATE DB2::db2
+        PRIVATE db2_wrapper
     )
 endfunction()
 
