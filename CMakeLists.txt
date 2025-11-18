@@ -37,6 +37,9 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/include")
     message(FATAL_ERROR "Include directory not found: ${CMAKE_SOURCE_DIR}/include")
 endif()
 
+# Make headers under src/ available to all targets (for header-only utilities like resource pool)
+include_directories(${PROJECT_SOURCE_DIR}/src)
+
 # ==============================================================================
 # Protobuf and gRPC Code Generation
 # ==============================================================================
