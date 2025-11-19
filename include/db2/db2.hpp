@@ -95,8 +95,17 @@ private:
   bool connected_{false};
   mutable std::mutex mtx_{}; // Serialize operations on the connection
 
+  // Reconnection support
+  enum class ConnMode { None, Dsn, ConnStr };
+  ConnMode mode_{ConnMode::None};
+  std::string dsn_{};
+  std::string uid_{};
+  std::string pwd_{};
+  std::string conn_str_{};
+
   void ensure_connected_locked();
   void cleanup_locked() noexcept;
+  bool try_reconnect_locked() noexcept; // attempt reconnect using stored parameters
 
   void execute_prepared_locked(std::string_view sql, const Param* params, int param_count);
 

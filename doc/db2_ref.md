@@ -310,6 +310,22 @@ This robust approach provides:
 
 Choose this implementation for production systems where reliability is paramount while maintaining reasonable performance.
 
+# Auto-Reconnect Behavior (Added)
+
+This project’s DB2 wrapper now supports automatic reconnect on transient connection failures.
+
+- When a statement fails with a connection-related SQLSTATE (08xxx, HYT00/HYT01, 40003, 58004), the Connection will:
+  - Attempt to reconnect using the same parameters previously supplied to connect_with_dsn or connect_with_conn_str.
+  - Retry the failed operation exactly once.
+- For queries, if rows have already been delivered to the caller and a fetch fails afterwards, the connection error is propagated without retry to avoid duplicate rows or partial replays.
+- The behavior is best-effort and thread-safe: operations are serialized by an internal mutex.
+- No public API changes were required.
+
+Limitations and Notes:
+- Only a single retry is performed to prevent long blocking. Your application can implement higher-level retry/backoff as needed.
+- The wrapper relies on SQLSTATE classification from the driver diagnostics to decide when to reconnect.
+- If the initial reconnect attempt fails, the original error is propagated.
+
 # Second Ref
 
 Here’s the full answer reformatted in Markdown with clear sections, code examples, and comparison tables — suitable for documentation or internal design notes.

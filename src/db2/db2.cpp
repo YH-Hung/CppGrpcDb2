@@ -41,6 +41,21 @@ inline void throw_diag(SQLSMALLINT handleType, SQLHANDLE handle, const char* whe
   throw std::runtime_error(oss.str());
 }
 
+inline std::string first_sql_state(SQLSMALLINT handleType, SQLHANDLE handle) {
+  SQLCHAR sqlState[6] = {0};
+  SQLRETURN rc = SQLGetDiagRec(handleType, handle, 1, sqlState, nullptr, nullptr, 0, nullptr);
+  if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+    return std::string(reinterpret_cast<char*>(sqlState));
+  }
+  return {};
+}
+
+inline bool is_connection_broken_sqlstate(std::string_view state) {
+  if (state.size() >= 2 && state[0] == '0' && state[1] == '8') return true; // 08xxx
+  // Common CLI/ODBC timeouts/comm failures that imply reconnect
+  return (state == "40003" || state == "HYT00" || state == "HYT01" || state == "58004");
+}
+
 } // namespace
 
 namespace db2 {
@@ -106,9 +121,15 @@ Connection::Connection(Connection&& other) noexcept {
   henv_ = other.henv_;
   hdbc_ = other.hdbc_;
   connected_ = other.connected_;
+  mode_ = other.mode_;
+  dsn_ = std::move(other.dsn_);
+  uid_ = std::move(other.uid_);
+  pwd_ = std::move(other.pwd_);
+  conn_str_ = std::move(other.conn_str_);
   other.henv_ = 0;
   other.hdbc_ = 0;
   other.connected_ = false;
+  other.mode_ = ConnMode::None;
 }
 
 Connection& Connection::operator=(Connection&& other) noexcept {
@@ -118,9 +139,15 @@ Connection& Connection::operator=(Connection&& other) noexcept {
   henv_ = other.henv_;
   hdbc_ = other.hdbc_;
   connected_ = other.connected_;
+  mode_ = other.mode_;
+  dsn_ = std::move(other.dsn_);
+  uid_ = std::move(other.uid_);
+  pwd_ = std::move(other.pwd_);
+  conn_str_ = std::move(other.conn_str_);
   other.henv_ = 0;
   other.hdbc_ = 0;
   other.connected_ = false;
+  other.mode_ = ConnMode::None;
   return *this;
 }
 
@@ -148,6 +175,12 @@ void Connection::connect_with_dsn(std::string_view dsn, std::string_view uid, st
     throw_diag(SQL_HANDLE_DBC, hdbc, "SQLConnect");
   }
   connected_ = true;
+  // Store for potential auto-reconnect
+  mode_ = ConnMode::Dsn;
+  dsn_.assign(dsn.begin(), dsn.end());
+  uid_.assign(uid.begin(), uid.end());
+  pwd_.assign(pwd.begin(), pwd.end());
+  conn_str_.clear();
 }
 
 void Connection::connect_with_conn_str(std::string_view conn_str) {
@@ -165,6 +198,10 @@ void Connection::connect_with_conn_str(std::string_view conn_str) {
     throw_diag(SQL_HANDLE_DBC, hdbc, "SQLDriverConnect");
   }
   connected_ = true;
+  // Store for potential auto-reconnect
+  mode_ = ConnMode::ConnStr;
+  conn_str_.assign(conn_str.begin(), conn_str.end());
+  dsn_.clear(); uid_.clear(); pwd_.clear();
 }
 
 void Connection::disconnect() noexcept {
@@ -190,154 +227,133 @@ void Connection::cleanup_locked() noexcept {
   }
 }
 
+bool Connection::try_reconnect_locked() noexcept {
+  // Assumes mtx_ is held
+  if (hdbc_ == 0 || henv_ == 0) return false;
+  auto hdbc = load_handle<HDBC>(hdbc_);
+  // Attempt to disconnect first, ignore errors
+  SQLDisconnect(hdbc);
+  connected_ = false;
+
+  SQLRETURN rc = SQL_ERROR;
+  switch (mode_) {
+    case ConnMode::Dsn: {
+      if (dsn_.empty()) return false;
+      rc = SQLConnect(
+          hdbc,
+          (SQLCHAR*)dsn_.c_str(), static_cast<SQLSMALLINT>(dsn_.size()),
+          (SQLCHAR*)uid_.c_str(), static_cast<SQLSMALLINT>(uid_.size()),
+          (SQLCHAR*)pwd_.c_str(), static_cast<SQLSMALLINT>(pwd_.size()));
+      break;
+    }
+    case ConnMode::ConnStr: {
+      if (conn_str_.empty()) return false;
+      SQLCHAR outConn[1024];
+      SQLSMALLINT outLen = 0;
+      rc = SQLDriverConnect(
+          hdbc, nullptr,
+          (SQLCHAR*)conn_str_.c_str(), static_cast<SQLSMALLINT>(conn_str_.size()),
+          outConn, sizeof(outConn), &outLen,
+          SQL_DRIVER_NOPROMPT);
+      break;
+    }
+    case ConnMode::None:
+    default:
+      return false;
+  }
+
+  if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+    connected_ = true;
+    return true;
+  }
+  return false;
+}
+
 void Connection::execute(std::string_view sql) {
   std::scoped_lock lk(mtx_);
   ensure_connected_locked();
-  HSTMT hstmt{};
-  SQLRETURN rc = SQLAllocHandle(SQL_HANDLE_STMT, load_handle<HDBC>(hdbc_), &hstmt);
-  if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-    throw_diag(SQL_HANDLE_DBC, load_handle<HDBC>(hdbc_), "SQLAllocHandle(SQL_HANDLE_STMT)");
-  }
-  rc = SQLExecDirect(hstmt, (SQLCHAR*)sql.data(), static_cast<SQLINTEGER>(sql.size()));
-  if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
+  auto hdbc = load_handle<HDBC>(hdbc_);
+  int attempts = 0;
+  for (;;) {
+    HSTMT hstmt{};
+    SQLRETURN rc = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
+    if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
+      std::string st = first_sql_state(SQL_HANDLE_DBC, hdbc);
+      if (attempts == 0 && is_connection_broken_sqlstate(st) && try_reconnect_locked()) {
+        ++attempts; hdbc = load_handle<HDBC>(hdbc_); continue; // retry
+      }
+      throw_diag(SQL_HANDLE_DBC, hdbc, "SQLAllocHandle(SQL_HANDLE_STMT)");
+    }
+
+    rc = SQLExecDirect(hstmt, (SQLCHAR*)sql.data(), static_cast<SQLINTEGER>(sql.size()));
+    if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+      SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+      return;
+    }
+
+    std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt);
     std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
     SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    if (attempts == 0 && is_connection_broken_sqlstate(st) && try_reconnect_locked()) {
+      ++attempts; hdbc = load_handle<HDBC>(hdbc_); continue; // retry once
+    }
     throw std::runtime_error("SQLExecDirect failed: " + msg);
   }
-  SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
 }
 
 void Connection::execute(std::string_view sql, const std::vector<Param>& params) {
   std::scoped_lock lk(mtx_);
   ensure_connected_locked();
-  execute_prepared_locked(sql, params.data(), static_cast<int>(params.size()));
+  int attempts = 0;
+  for (;;) {
+    try {
+      execute_prepared_locked(sql, params.data(), static_cast<int>(params.size()));
+      return;
+    } catch (const std::runtime_error& ex) {
+      // Heuristically decide if we should reconnect based on last diagnostics on DBC
+      auto hdbc = load_handle<HDBC>(hdbc_);
+      std::string st = first_sql_state(SQL_HANDLE_DBC, hdbc);
+      if (attempts == 0 && is_connection_broken_sqlstate(st) && try_reconnect_locked()) {
+        ++attempts; continue; // retry once
+      }
+      throw; // propagate original
+    }
+  }
 }
 
 void Connection::execute_prepared_locked(std::string_view sql, const Param* params, int param_count) {
-  HSTMT hstmt{};
-  SQLRETURN rc = SQLAllocHandle(SQL_HANDLE_STMT, load_handle<HDBC>(hdbc_), &hstmt);
-  if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-    throw_diag(SQL_HANDLE_DBC, load_handle<HDBC>(hdbc_), "SQLAllocHandle(SQL_HANDLE_STMT)");
-  }
-
-  rc = SQLPrepare(hstmt, (SQLCHAR*)sql.data(), static_cast<SQLINTEGER>(sql.size()));
-  if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-    std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
-    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-    throw std::runtime_error("SQLPrepare failed: " + msg);
-  }
-
-  // Storage for bound values and indicators to keep memory alive
-  std::vector<int32_t> i32_vals;
-  std::vector<int64_t> i64_vals;
-  std::vector<double> dbl_vals;
-  std::vector<std::string> str_vals;
-  std::vector<SQLLEN> ind_vals;
-  i32_vals.reserve(param_count);
-  i64_vals.reserve(param_count);
-  dbl_vals.reserve(param_count);
-  str_vals.reserve(param_count);
-  ind_vals.resize(param_count, 0);
-
-  for (int i = 0; i < param_count; ++i) {
-    SQLUSMALLINT paramNum = static_cast<SQLUSMALLINT>(i + 1);
-    SQLSMALLINT cType = 0;
-    SQLSMALLINT sqlType = 0;
-    SQLULEN colDef = 0;
-    SQLSMALLINT scale = 0;
-    SQLPOINTER valPtr = nullptr;
-    SQLLEN* indPtr = &ind_vals[i];
-
-    const auto& v = params[i].value;
-    if (std::holds_alternative<std::nullptr_t>(v)) {
-      // Bind NULL, treat as VARCHAR with NULL indicator
-      cType = SQL_C_CHAR;
-      sqlType = SQL_VARCHAR;
-      colDef = 1;
-      scale = 0;
-      valPtr = nullptr;
-      *indPtr = SQL_NULL_DATA;
-    } else if (auto pv = std::get_if<int32_t>(&v)) {
-      cType = SQL_C_SLONG;
-      sqlType = SQL_INTEGER;
-      colDef = 0;
-      scale = 0;
-      i32_vals.push_back(*pv);
-      valPtr = &i32_vals.back();
-      *indPtr = sizeof(int32_t);
-    } else if (auto pv = std::get_if<int64_t>(&v)) {
-      cType = SQL_C_SBIGINT;
-      sqlType = SQL_BIGINT;
-      colDef = 0;
-      scale = 0;
-      i64_vals.push_back(*pv);
-      valPtr = &i64_vals.back();
-      *indPtr = sizeof(int64_t);
-    } else if (auto pv = std::get_if<double>(&v)) {
-      cType = SQL_C_DOUBLE;
-      sqlType = SQL_DOUBLE;
-      colDef = 0;
-      scale = 0;
-      dbl_vals.push_back(*pv);
-      valPtr = &dbl_vals.back();
-      *indPtr = sizeof(double);
-    } else if (auto pv = std::get_if<std::string>(&v)) {
-      cType = SQL_C_CHAR;
-      sqlType = SQL_VARCHAR;
-      colDef = static_cast<SQLULEN>(pv->size() > 0 ? pv->size() : 1);
-      scale = 0;
-      str_vals.push_back(*pv);
-      valPtr = (SQLPOINTER)str_vals.back().data();
-      *indPtr = static_cast<SQLLEN>(str_vals.back().size());
-    }
-
-    rc = SQLBindParameter(hstmt, paramNum, SQL_PARAM_INPUT,
-                          cType, sqlType, colDef, scale,
-                          valPtr, 0, indPtr);
+  auto hdbc = load_handle<HDBC>(hdbc_);
+  int attempts = 0;
+  for (;;) {
+    HSTMT hstmt{};
+    SQLRETURN rc = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
     if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-      std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
-      SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-      throw std::runtime_error("SQLBindParameter failed: " + msg);
+      std::string st = first_sql_state(SQL_HANDLE_DBC, hdbc);
+      if (attempts == 0 && is_connection_broken_sqlstate(st) && try_reconnect_locked()) {
+        ++attempts; hdbc = load_handle<HDBC>(hdbc_); continue;
+      }
+      throw_diag(SQL_HANDLE_DBC, hdbc, "SQLAllocHandle(SQL_HANDLE_STMT)");
     }
-  }
 
-  rc = SQLExecute(hstmt);
-  if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-    std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
-    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-    throw std::runtime_error("SQLExecute failed: " + msg);
-  }
-
-  SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-}
-
-void Connection::query_to_callback(std::string_view sql, const Param* params, int param_count,
-                                   const std::function<void(const Row&)>& on_row) {
-  std::scoped_lock lk(mtx_);
-  ensure_connected_locked();
-
-  HSTMT hstmt{};
-  SQLRETURN rc = SQLAllocHandle(SQL_HANDLE_STMT, load_handle<HDBC>(hdbc_), &hstmt);
-  if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-    throw_diag(SQL_HANDLE_DBC, load_handle<HDBC>(hdbc_), "SQLAllocHandle(SQL_HANDLE_STMT)");
-  }
-
-  bool prepared = (params != nullptr && param_count > 0);
-  if (prepared) {
     rc = SQLPrepare(hstmt, (SQLCHAR*)sql.data(), static_cast<SQLINTEGER>(sql.size()));
     if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
+      std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt);
       std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
       SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+      if (attempts == 0 && is_connection_broken_sqlstate(st) && try_reconnect_locked()) {
+        ++attempts; hdbc = load_handle<HDBC>(hdbc_); continue;
+      }
       throw std::runtime_error("SQLPrepare failed: " + msg);
     }
 
-    // Bind parameters (reuse helper logic inline)
-    std::vector<int32_t> i32_vals;
-    std::vector<int64_t> i64_vals;
-    std::vector<double> dbl_vals;
-    std::vector<std::string> str_vals;
+    // Storage for bound values and indicators to keep memory alive
+    std::vector<int32_t> i32_vals; i32_vals.reserve(param_count);
+    std::vector<int64_t> i64_vals; i64_vals.reserve(param_count);
+    std::vector<double>  dbl_vals; dbl_vals.reserve(param_count);
+    std::vector<std::string> str_vals; str_vals.reserve(param_count);
     std::vector<SQLLEN> ind_vals(param_count, 0);
 
+    bool bind_ok = true;
     for (int i = 0; i < param_count; ++i) {
       SQLUSMALLINT paramNum = static_cast<SQLUSMALLINT>(i + 1);
       SQLSMALLINT cType = 0;
@@ -349,85 +365,139 @@ void Connection::query_to_callback(std::string_view sql, const Param* params, in
 
       const auto& v = params[i].value;
       if (std::holds_alternative<std::nullptr_t>(v)) {
-        cType = SQL_C_CHAR;
-        sqlType = SQL_VARCHAR;
-        colDef = 1;
-        scale = 0;
-        valPtr = nullptr;
-        *indPtr = SQL_NULL_DATA;
+        cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; colDef = 1; scale = 0; valPtr = nullptr; *indPtr = SQL_NULL_DATA;
       } else if (auto pv = std::get_if<int32_t>(&v)) {
-        cType = SQL_C_SLONG;
-        sqlType = SQL_INTEGER;
-        colDef = 0;
-        scale = 0;
-        i32_vals.push_back(*pv);
-        valPtr = &i32_vals.back();
-        *indPtr = sizeof(int32_t);
+        cType = SQL_C_SLONG; sqlType = SQL_INTEGER; i32_vals.push_back(*pv); valPtr = &i32_vals.back(); *indPtr = sizeof(int32_t);
       } else if (auto pv = std::get_if<int64_t>(&v)) {
-        cType = SQL_C_SBIGINT;
-        sqlType = SQL_BIGINT;
-        colDef = 0;
-        scale = 0;
-        i64_vals.push_back(*pv);
-        valPtr = &i64_vals.back();
-        *indPtr = sizeof(int64_t);
+        cType = SQL_C_SBIGINT; sqlType = SQL_BIGINT; i64_vals.push_back(*pv); valPtr = &i64_vals.back(); *indPtr = sizeof(int64_t);
       } else if (auto pv = std::get_if<double>(&v)) {
-        cType = SQL_C_DOUBLE;
-        sqlType = SQL_DOUBLE;
-        colDef = 0;
-        scale = 0;
-        dbl_vals.push_back(*pv);
-        valPtr = &dbl_vals.back();
-        *indPtr = sizeof(double);
+        cType = SQL_C_DOUBLE; sqlType = SQL_DOUBLE; dbl_vals.push_back(*pv); valPtr = &dbl_vals.back(); *indPtr = sizeof(double);
       } else if (auto pv = std::get_if<std::string>(&v)) {
-        cType = SQL_C_CHAR;
-        sqlType = SQL_VARCHAR;
-        colDef = static_cast<SQLULEN>(pv->size() > 0 ? pv->size() : 1);
-        scale = 0;
-        str_vals.push_back(*pv);
-        valPtr = (SQLPOINTER)str_vals.back().data();
-        *indPtr = static_cast<SQLLEN>(str_vals.back().size());
+        cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; SQLULEN len = static_cast<SQLULEN>(pv->size() > 0 ? pv->size() : 1);
+        colDef = len; scale = 0; str_vals.push_back(*pv); valPtr = (SQLPOINTER)str_vals.back().data(); *indPtr = static_cast<SQLLEN>(str_vals.back().size());
       }
 
       rc = SQLBindParameter(hstmt, paramNum, SQL_PARAM_INPUT,
                             cType, sqlType, colDef, scale,
                             valPtr, 0, indPtr);
       if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
+        std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt);
         std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
         SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        if (attempts == 0 && is_connection_broken_sqlstate(st) && try_reconnect_locked()) {
+          ++attempts; hdbc = load_handle<HDBC>(hdbc_); bind_ok = false; break; // retry
+        }
         throw std::runtime_error("SQLBindParameter failed: " + msg);
       }
     }
+    if (!bind_ok) continue; // go retry
 
     rc = SQLExecute(hstmt);
-    if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-      std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
+    if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
       SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-      throw std::runtime_error("SQLExecute failed: " + msg);
+      return;
     }
-  } else {
-    rc = SQLExecDirect(hstmt, (SQLCHAR*)sql.data(), static_cast<SQLINTEGER>(sql.size()));
+
+    std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt);
+    std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    if (attempts == 0 && is_connection_broken_sqlstate(st) && try_reconnect_locked()) {
+      ++attempts; hdbc = load_handle<HDBC>(hdbc_); continue; // retry once
+    }
+    throw std::runtime_error("SQLExecute failed: " + msg);
+  }
+}
+
+void Connection::query_to_callback(std::string_view sql, const Param* params, int param_count,
+                                   const std::function<void(const Row&)>& on_row) {
+  std::scoped_lock lk(mtx_);
+  ensure_connected_locked();
+
+  auto hdbc = load_handle<HDBC>(hdbc_);
+  int attempts = 0;
+  bool prepared = (params != nullptr && param_count > 0);
+  bool delivered_any = false;
+
+  auto run_once = [&](HDBC use_hdbc, int& out_rows) -> std::pair<bool, std::string> {
+    out_rows = 0;
+    HSTMT hstmt{};
+    SQLRETURN rc = SQLAllocHandle(SQL_HANDLE_STMT, use_hdbc, &hstmt);
     if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-      std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
-      SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-      throw std::runtime_error("SQLExecDirect failed: " + msg);
+      std::string st = first_sql_state(SQL_HANDLE_DBC, use_hdbc);
+      return {false, st};
+    }
+
+    auto finish_stmt = [&]() { SQLCloseCursor(hstmt); SQLFreeHandle(SQL_HANDLE_STMT, hstmt); };
+
+    if (prepared) {
+      rc = SQLPrepare(hstmt, (SQLCHAR*)sql.data(), static_cast<SQLINTEGER>(sql.size()));
+      if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
+        std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt);
+        finish_stmt();
+        return {false, st};
+      }
+
+      std::vector<int32_t> i32_vals; i32_vals.reserve(param_count);
+      std::vector<int64_t> i64_vals; i64_vals.reserve(param_count);
+      std::vector<double>  dbl_vals; dbl_vals.reserve(param_count);
+      std::vector<std::string> str_vals; str_vals.reserve(param_count);
+      std::vector<SQLLEN> ind_vals(param_count, 0);
+
+      for (int i = 0; i < param_count; ++i) {
+        SQLUSMALLINT paramNum = static_cast<SQLUSMALLINT>(i + 1);
+        SQLSMALLINT cType = 0; SQLSMALLINT sqlType = 0; SQLULEN colDef = 0; SQLSMALLINT scale = 0; SQLPOINTER valPtr = nullptr; SQLLEN* indPtr = &ind_vals[i];
+        const auto& v = params[i].value;
+        if (std::holds_alternative<std::nullptr_t>(v)) { cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; colDef = 1; scale = 0; valPtr = nullptr; *indPtr = SQL_NULL_DATA; }
+        else if (auto pv = std::get_if<int32_t>(&v)) { cType = SQL_C_SLONG; sqlType = SQL_INTEGER; i32_vals.push_back(*pv); valPtr = &i32_vals.back(); *indPtr = sizeof(int32_t); }
+        else if (auto pv = std::get_if<int64_t>(&v)) { cType = SQL_C_SBIGINT; sqlType = SQL_BIGINT; i64_vals.push_back(*pv); valPtr = &i64_vals.back(); *indPtr = sizeof(int64_t); }
+        else if (auto pv = std::get_if<double>(&v)) { cType = SQL_C_DOUBLE; sqlType = SQL_DOUBLE; dbl_vals.push_back(*pv); valPtr = &dbl_vals.back(); *indPtr = sizeof(double); }
+        else if (auto pv = std::get_if<std::string>(&v)) { cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; SQLULEN len = static_cast<SQLULEN>(pv->size() > 0 ? pv->size() : 1); colDef = len; scale = 0; str_vals.push_back(*pv); valPtr = (SQLPOINTER)str_vals.back().data(); *indPtr = static_cast<SQLLEN>(str_vals.back().size()); }
+        rc = SQLBindParameter(hstmt, paramNum, SQL_PARAM_INPUT, cType, sqlType, colDef, scale, valPtr, 0, indPtr);
+        if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt); finish_stmt(); return {false, st}; }
+      }
+
+      rc = SQLExecute(hstmt);
+      if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt); finish_stmt(); return {false, st}; }
+    } else {
+      rc = SQLExecDirect(hstmt, (SQLCHAR*)sql.data(), static_cast<SQLINTEGER>(sql.size()));
+      if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt); finish_stmt(); return {false, st}; }
+    }
+
+    while (true) {
+      rc = SQLFetch(hstmt);
+      if (rc == SQL_NO_DATA) break;
+      if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
+        std::string st = first_sql_state(SQL_HANDLE_STMT, hstmt);
+        finish_stmt();
+        // Only allow retry if we haven't delivered any row yet
+        if (!delivered_any) return {false, st};
+        // If we already delivered rows, propagate error by encoding non-connection state
+        return {false, std::string{""}};
+      }
+      Row row{store_handle(hstmt)};
+      on_row(row);
+      ++out_rows;
+      delivered_any = true;
+    }
+
+    finish_stmt();
+    return {true, std::string{}};
+  };
+
+  for (;;) {
+    int out_rows = 0;
+    auto [ok, state] = run_once(hdbc, out_rows);
+    if (ok) return;
+    if (attempts == 0 && is_connection_broken_sqlstate(state) && try_reconnect_locked()) {
+      ++attempts; hdbc = load_handle<HDBC>(hdbc_); continue; // retry once from scratch
+    }
+    // If not retried, throw diagnostics from DBC or state we have
+    if (prepared) {
+      throw std::runtime_error("Query failed (prepare/execute/fetch) and reconnect did not resolve the issue.");
+    } else {
+      throw std::runtime_error("Query failed (exec/fetch) and reconnect did not resolve the issue.");
     }
   }
-
-  while (true) {
-    rc = SQLFetch(hstmt);
-    if (rc == SQL_NO_DATA) break;
-    if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
-      std::string msg = diag_message(SQL_HANDLE_STMT, hstmt);
-      SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-      throw std::runtime_error("SQLFetch failed: " + msg);
-    }
-    Row row{store_handle(hstmt)};
-    on_row(row);
-  }
-
-  SQLCloseCursor(hstmt);
-  SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
 }
 
 // ---------------- Row getters ----------------
