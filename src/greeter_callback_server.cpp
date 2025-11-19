@@ -16,6 +16,9 @@
 #include "absl/flags/parse.h"
 #include "absl/strings/str_format.h"
 
+#include "db2/db2.hpp"
+#include "resource/resource_pool.hpp"
+
 #ifdef BAZEL_BUILD
 #include "examples/protos/helloworld.grpc.pb.h"
 #else
@@ -39,7 +42,10 @@ using helloworld::HelloRequest;
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::CallbackService {
  public:
-  GreeterServiceImpl() = default;
+  using Db2Pool = resource::ResourcePool<db2::Connection>;
+
+  explicit GreeterServiceImpl(std::shared_ptr<Db2Pool> pool)
+      : pool_(std::move(pool)) {}
 
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
                                const HelloRequest* request,
@@ -54,12 +60,30 @@ class GreeterServiceImpl final : public Greeter::CallbackService {
       return reactor;
     }
 
+    // Acquire a DB2 Connection from the shared pool just for demonstration
+    // It will be returned to the pool automatically when it goes out of scope.
+    std::shared_ptr<db2::Connection> conn;
+    if (pool_) {
+      try {
+        conn = pool_->acquire();
+        spdlog::info("Acquired DB2 resource from pool. in_use={}, idle={}",
+                     pool_->in_use(), pool_->idle_size());
+        // Demonstration only: no actual DB operations are performed.
+      } catch (const std::exception& e) {
+        spdlog::error("Failed to acquire DB2 resource: {}", e.what());
+      }
+    } else {
+      spdlog::warn("DB2 pool not available; proceeding without DB resource.");
+    }
+
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
 
     reactor->Finish(Status::OK);
     return reactor;
   }
+ private:
+  std::shared_ptr<Db2Pool> pool_;
 };
 
 void RunServer(uint16_t port) {
@@ -85,7 +109,19 @@ void RunServer(uint16_t port) {
     return "[TRANSFORMED] " + input;
   });
 
-  GreeterServiceImpl service;
+  // Create a shared resource pool of db2::Connection objects.
+  // This demonstrates pooling only; no actual DB connection is performed.
+  using Db2Pool = resource::ResourcePool<db2::Connection>;
+  auto db2_pool = Db2Pool::create(
+      /*max_size=*/8,
+      []() {
+        // Construct a Connection object; do NOT call connect_* in this demo.
+        return std::make_unique<db2::Connection>();
+      }
+      // No validator provided to avoid requiring a real DB connection.
+  );
+
+  GreeterServiceImpl service(db2_pool);
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
