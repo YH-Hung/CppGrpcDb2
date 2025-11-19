@@ -253,3 +253,25 @@ set(MSVC_TEST_TARGETS
 foreach(test_target ${MSVC_TEST_TARGETS})
     create_test_executable(${test_target} "tests/msvc/${test_target}.cpp")
 endforeach()
+
+# DB2 wrapper integration tests (opt-in, require DB2 client runtime to be present)
+option(BUILD_DB2_TESTS "Build DB2 wrapper integration tests" OFF)
+if(BUILD_DB2_TESTS)
+    add_executable(db2_wrapper_tests
+        tests/db2/test_db2_wrapper.cpp
+    )
+
+    target_include_directories(db2_wrapper_tests
+        PRIVATE ${PROJECT_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(db2_wrapper_tests
+        PRIVATE GTest::gtest
+        PRIVATE GTest::gtest_main
+        PRIVATE db2_wrapper
+    )
+
+    add_test(NAME db2_wrapper_tests COMMAND db2_wrapper_tests)
+
+    target_compile_features(db2_wrapper_tests PRIVATE cxx_std_20)
+endif()

@@ -55,7 +55,7 @@ public:
   };
 
   Connection();
-  ~Connection();
+  ~Connection() noexcept;
 
   Connection(const Connection&) = delete;
   Connection& operator=(const Connection&) = delete;
