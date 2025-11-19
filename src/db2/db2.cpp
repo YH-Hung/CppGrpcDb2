@@ -75,6 +75,9 @@ inline bool is_connection_broken_sqlstate(std::string_view state) {
   return (state == "40003" || state == "HYT00" || state == "HYT01" || state == "58004");
 }
 
+// Non-null placeholder for NULL parameter bindings (some drivers dereference ValuePtr even for NULL)
+static unsigned char g_null_param_dummy = 0;
+
 } // namespace
 
 namespace db2 {
@@ -407,25 +410,32 @@ void Connection::execute_prepared_locked(std::string_view sql, const Param* para
       SQLLEN* indPtr = &ind_vals[i];
 
       const auto& v = params[i].value;
+      SQLLEN buffer_len = 0;
       if (std::holds_alternative<std::nullptr_t>(v)) {
-        cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; colDef = 1; scale = 0; valPtr = nullptr; *indPtr = SQL_NULL_DATA;
+        // Use non-null dummy pointer and mark indicator as NULL
+        cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; colDef = 1; scale = 0; valPtr = &g_null_param_dummy; *indPtr = SQL_NULL_DATA; buffer_len = 1;
       } else if (auto pv = std::get_if<int32_t>(&v)) {
-        cType = SQL_C_SLONG; sqlType = SQL_INTEGER; i32_vals.push_back(*pv); valPtr = &i32_vals.back(); *indPtr = sizeof(int32_t);
+        cType = SQL_C_SLONG; sqlType = SQL_INTEGER; i32_vals.push_back(*pv); valPtr = &i32_vals.back(); *indPtr = sizeof(int32_t); buffer_len = sizeof(int32_t);
       } else if (auto pv = std::get_if<int64_t>(&v)) {
-        cType = SQL_C_SBIGINT; sqlType = SQL_BIGINT; i64_vals.push_back(*pv); valPtr = &i64_vals.back(); *indPtr = sizeof(int64_t);
+        cType = SQL_C_SBIGINT; sqlType = SQL_BIGINT; i64_vals.push_back(*pv); valPtr = &i64_vals.back(); *indPtr = sizeof(int64_t); buffer_len = sizeof(int64_t);
       } else if (auto pv = std::get_if<double>(&v)) {
-        cType = SQL_C_DOUBLE; sqlType = SQL_DOUBLE; dbl_vals.push_back(*pv); valPtr = &dbl_vals.back(); *indPtr = sizeof(double);
+        cType = SQL_C_DOUBLE; sqlType = SQL_DOUBLE; dbl_vals.push_back(*pv); valPtr = &dbl_vals.back(); *indPtr = sizeof(double); buffer_len = sizeof(double);
       } else if (auto pv = std::get_if<std::string>(&v)) {
         cType = SQL_C_CHAR; sqlType = SQL_VARCHAR;
-        SQLULEN len = static_cast<SQLULEN>(pv->size() > 0 ? pv->size() : 1);
-        colDef = len; scale = 0; str_vals.push_back(*pv);
+        // Use a safe column definition to avoid truncation metadata issues
+        const SQLULEN actual = static_cast<SQLULEN>(pv->size());
+        const SQLULEN safe_def = std::max<SQLULEN>(actual, 4096);
+        colDef = std::max<SQLULEN>(safe_def, 1);
+        scale = 0;
+        str_vals.push_back(*pv);
         valPtr = reinterpret_cast<SQLPOINTER>(str_vals.back().data());
-        *indPtr = SQL_NTS; // use null-terminated string indicator
+        *indPtr = SQL_NTS; // null-terminated
+        buffer_len = static_cast<SQLLEN>(str_vals.back().size() + 1);
       }
 
       rc = SQLBindParameter(stmt.h, paramNum, SQL_PARAM_INPUT,
                             cType, sqlType, colDef, scale,
-                            valPtr, 0, indPtr);
+                            valPtr, buffer_len, indPtr);
       if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
         std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h);
         std::string msg = diag_message(SQL_HANDLE_STMT, stmt.h);
@@ -467,6 +477,7 @@ void Connection::query_to_callback(std::string_view sql, const Param* params, in
     SQLRETURN rc = (stmt.h ? SQL_SUCCESS : SQL_ERROR);
     if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
       std::string st = first_sql_state(SQL_HANDLE_DBC, use_hdbc);
+      if (st.empty()) st = "HY000";
       return {false, st};
     }
 
@@ -475,6 +486,8 @@ void Connection::query_to_callback(std::string_view sql, const Param* params, in
       rc = SQLPrepare(stmt.h, to_sqlchar(sql_s.c_str()), SQL_NTS);
       if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
         std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h);
+        if (st.empty()) st = first_sql_state(SQL_HANDLE_DBC, use_hdbc);
+        if (st.empty()) st = "HY000";
         return {false, st};
       }
 
@@ -488,21 +501,22 @@ void Connection::query_to_callback(std::string_view sql, const Param* params, in
         SQLUSMALLINT paramNum = static_cast<SQLUSMALLINT>(i + 1);
         SQLSMALLINT cType = 0; SQLSMALLINT sqlType = 0; SQLULEN colDef = 0; SQLSMALLINT scale = 0; SQLPOINTER valPtr = nullptr; SQLLEN* indPtr = &ind_vals[i];
         const auto& v = params[i].value;
-        if (std::holds_alternative<std::nullptr_t>(v)) { cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; colDef = 1; scale = 0; valPtr = nullptr; *indPtr = SQL_NULL_DATA; }
-        else if (auto pv = std::get_if<int32_t>(&v)) { cType = SQL_C_SLONG; sqlType = SQL_INTEGER; i32_vals.push_back(*pv); valPtr = &i32_vals.back(); *indPtr = sizeof(int32_t); }
-        else if (auto pv = std::get_if<int64_t>(&v)) { cType = SQL_C_SBIGINT; sqlType = SQL_BIGINT; i64_vals.push_back(*pv); valPtr = &i64_vals.back(); *indPtr = sizeof(int64_t); }
-        else if (auto pv = std::get_if<double>(&v)) { cType = SQL_C_DOUBLE; sqlType = SQL_DOUBLE; dbl_vals.push_back(*pv); valPtr = &dbl_vals.back(); *indPtr = sizeof(double); }
-        else if (auto pv = std::get_if<std::string>(&v)) { cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; SQLULEN len = static_cast<SQLULEN>(pv->size() > 0 ? pv->size() : 1); colDef = len; scale = 0; str_vals.push_back(*pv); valPtr = reinterpret_cast<SQLPOINTER>(str_vals.back().data()); *indPtr = SQL_NTS; }
-        rc = SQLBindParameter(stmt.h, paramNum, SQL_PARAM_INPUT, cType, sqlType, colDef, scale, valPtr, 0, indPtr);
-        if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h); return {false, st}; }
+        SQLLEN buffer_len = 0;
+        if (std::holds_alternative<std::nullptr_t>(v)) { cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; colDef = 1; scale = 0; valPtr = &g_null_param_dummy; *indPtr = SQL_NULL_DATA; buffer_len = 1; }
+        else if (auto pv = std::get_if<int32_t>(&v)) { cType = SQL_C_SLONG; sqlType = SQL_INTEGER; i32_vals.push_back(*pv); valPtr = &i32_vals.back(); *indPtr = sizeof(int32_t); buffer_len = sizeof(int32_t); }
+        else if (auto pv = std::get_if<int64_t>(&v)) { cType = SQL_C_SBIGINT; sqlType = SQL_BIGINT; i64_vals.push_back(*pv); valPtr = &i64_vals.back(); *indPtr = sizeof(int64_t); buffer_len = sizeof(int64_t); }
+        else if (auto pv = std::get_if<double>(&v)) { cType = SQL_C_DOUBLE; sqlType = SQL_DOUBLE; dbl_vals.push_back(*pv); valPtr = &dbl_vals.back(); *indPtr = sizeof(double); buffer_len = sizeof(double); }
+        else if (auto pv = std::get_if<std::string>(&v)) { cType = SQL_C_CHAR; sqlType = SQL_VARCHAR; const SQLULEN actual = static_cast<SQLULEN>(pv->size()); const SQLULEN safe_def = std::max<SQLULEN>(actual, 4096); colDef = std::max<SQLULEN>(safe_def, 1); scale = 0; str_vals.push_back(*pv); valPtr = reinterpret_cast<SQLPOINTER>(str_vals.back().data()); *indPtr = SQL_NTS; buffer_len = static_cast<SQLLEN>(str_vals.back().size() + 1); }
+        rc = SQLBindParameter(stmt.h, paramNum, SQL_PARAM_INPUT, cType, sqlType, colDef, scale, valPtr, buffer_len, indPtr);
+        if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h); if (st.empty()) st = first_sql_state(SQL_HANDLE_DBC, use_hdbc); if (st.empty()) st = "HY000"; return {false, st}; }
       }
 
       rc = SQLExecute(stmt.h);
-      if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h); return {false, st}; }
+      if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h); if (st.empty()) st = first_sql_state(SQL_HANDLE_DBC, use_hdbc); if (st.empty()) st = "HY000"; return {false, st}; }
     } else {
       std::string sql_s(sql);
       rc = SQLExecDirect(stmt.h, to_sqlchar(sql_s.c_str()), SQL_NTS);
-      if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h); return {false, st}; }
+      if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) { std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h); if (st.empty()) st = first_sql_state(SQL_HANDLE_DBC, use_hdbc); if (st.empty()) st = "HY000"; return {false, st}; }
     }
 
     while (true) {
@@ -510,10 +524,9 @@ void Connection::query_to_callback(std::string_view sql, const Param* params, in
       if (rc == SQL_NO_DATA) break;
       if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
         std::string st = first_sql_state(SQL_HANDLE_STMT, stmt.h);
-        // Only allow retry if we haven't delivered any row yet
-        if (!delivered_any) return {false, st};
-        // If we already delivered rows, propagate error by encoding non-connection state
-        return {false, std::string{""}};
+        if (st.empty()) st = first_sql_state(SQL_HANDLE_DBC, use_hdbc);
+        if (st.empty()) st = "HY000"; // generic error state, never empty
+        return {false, st};
       }
       Row row{store_handle(stmt.h)};
       on_row(row);
@@ -544,7 +557,7 @@ void Connection::query_to_callback(std::string_view sql, const Param* params, in
 std::optional<int32_t> Connection::Row::getInt32(int col) const {
   SQLLEN ind = 0;
   int32_t val = 0;
-  SQLRETURN rc = SQLGetData(load_handle<HSTMT>(hstmt_), static_cast<SQLUSMALLINT>(col), SQL_C_SLONG, &val, 0, &ind);
+  SQLRETURN rc = SQLGetData(load_handle<HSTMT>(hstmt_), static_cast<SQLUSMALLINT>(col), SQL_C_SLONG, &val, sizeof(val), &ind);
   if (rc == SQL_NO_DATA) return std::nullopt;
   if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
     throw_diag(SQL_HANDLE_STMT, load_handle<HSTMT>(hstmt_), "SQLGetData(int32)");
@@ -556,7 +569,7 @@ std::optional<int32_t> Connection::Row::getInt32(int col) const {
 std::optional<int64_t> Connection::Row::getInt64(int col) const {
   SQLLEN ind = 0;
   int64_t val = 0;
-  SQLRETURN rc = SQLGetData(load_handle<HSTMT>(hstmt_), static_cast<SQLUSMALLINT>(col), SQL_C_SBIGINT, &val, 0, &ind);
+  SQLRETURN rc = SQLGetData(load_handle<HSTMT>(hstmt_), static_cast<SQLUSMALLINT>(col), SQL_C_SBIGINT, &val, sizeof(val), &ind);
   if (rc == SQL_NO_DATA) return std::nullopt;
   if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
     throw_diag(SQL_HANDLE_STMT, load_handle<HSTMT>(hstmt_), "SQLGetData(int64)");
@@ -568,7 +581,7 @@ std::optional<int64_t> Connection::Row::getInt64(int col) const {
 std::optional<double> Connection::Row::getDouble(int col) const {
   SQLLEN ind = 0;
   double val = 0.0;
-  SQLRETURN rc = SQLGetData(load_handle<HSTMT>(hstmt_), static_cast<SQLUSMALLINT>(col), SQL_C_DOUBLE, &val, 0, &ind);
+  SQLRETURN rc = SQLGetData(load_handle<HSTMT>(hstmt_), static_cast<SQLUSMALLINT>(col), SQL_C_DOUBLE, &val, sizeof(val), &ind);
   if (rc == SQL_NO_DATA) return std::nullopt;
   if (!(rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)) {
     throw_diag(SQL_HANDLE_STMT, load_handle<HSTMT>(hstmt_), "SQLGetData(double)");

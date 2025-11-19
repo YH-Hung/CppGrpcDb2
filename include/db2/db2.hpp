@@ -48,6 +48,13 @@ public:
     std::optional<double>  getDouble(int col) const;
     std::optional<std::string> getString(int col) const;
 
+    // Row is a non-owning view tied to the lifetime of an active statement.
+    // To prevent escaping the callback and becoming dangling, disallow copy/move.
+    Row(const Row&) = delete;
+    Row& operator=(const Row&) = delete;
+    Row(Row&&) = delete;
+    Row& operator=(Row&&) = delete;
+
   private:
     friend class Connection;
     explicit Row(std::uintptr_t hstmt) : hstmt_(hstmt) {}
