@@ -5,7 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <queue>
+#include <vector>
 #include <stdexcept>
 #include <thread>
 #include <chrono>
@@ -176,13 +176,29 @@ public:
             throw PoolException("Initial size cannot exceed max size");
         }
 
-        // Pre-allocate initial resources
+        // Pre-allocate initial resources (no lock needed during construction)
         try {
             for (size_t i = 0; i < config_.initial_size; ++i) {
-                auto resource = createResource();
-                if (resource) {
-                    available_.push(std::move(resource));
+                auto resource = factory_();
+                if (!resource) {
+                    throw PoolException("Factory returned null during initialization");
                 }
+
+                // Validate if configured
+                if (validator_) {
+                    bool valid = false;
+                    try {
+                        valid = validator_(*resource);
+                    } catch (...) {
+                        valid = false;
+                    }
+                    if (!valid) {
+                        throw PoolException("Validator rejected resource during initialization");
+                    }
+                }
+
+                available_.push_back(std::move(resource));
+                ++total_created_;
             }
         } catch (const std::exception& e) {
             // Clean up any created resources
@@ -225,20 +241,27 @@ public:
                 throw PoolException("Pool is shut down");
             }
 
-            // Try to get an available resource
+            // Try to get an available resource (LIFO - most recently used)
             if (!available_.empty()) {
-                auto resource = std::move(available_.front());
-                available_.pop();
+                auto resource = std::move(available_.back());
+                available_.pop_back();
 
-                // Validate if configured
+                // Validate outside mutex to avoid blocking other threads
                 if (config_.validate_on_acquire && validator_) {
-                    if (!validator_(*resource)) {
-                        // Resource is invalid, try to create a new one
+                    lock.unlock();
+                    bool valid = false;
+                    try {
+                        valid = validator_(*resource);
+                    } catch (...) {
+                        valid = false; // Treat exceptions as invalid
+                    }
+                    lock.lock();
+
+                    if (!valid) {
+                        // Resource is invalid, decrement counter and retry
                         --total_created_;
-                        resource = createResourceLocked();
-                        if (!resource) {
-                            continue; // Try again
-                        }
+                        cv_.notify_one(); // Wake waiters since we freed a slot
+                        continue;
                     }
                 }
 
@@ -252,12 +275,45 @@ public:
 
             // No available resource - can we create a new one?
             if (total_created_ < config_.max_size) {
-                auto resource = createResourceLocked();
-                if (resource) {
+                // Reserve slot and unlock before expensive factory call
+                ++total_created_;
+                lock.unlock();
+
+                std::unique_ptr<T> resource;
+                try {
+                    resource = factory_();
+                    if (!resource) {
+                        throw PoolException("Factory returned null resource");
+                    }
+
+                    // Validate outside mutex
+                    if (validator_) {
+                        bool valid = false;
+                        try {
+                            valid = validator_(*resource);
+                        } catch (...) {
+                            valid = false;
+                        }
+                        if (!valid) {
+                            // Rollback reservation
+                            std::lock_guard<std::mutex> rollback_lock(mutex_);
+                            --total_created_;
+                            cv_.notify_one();
+                            throw PoolException("Validator rejected newly created resource");
+                        }
+                    }
+
                     auto return_func = [this](std::unique_ptr<T> res) {
                         this->returnResource(std::move(res));
                     };
                     return ResourceHandle<T>(std::move(resource), std::move(return_func));
+
+                } catch (...) {
+                    // Rollback reservation on any failure
+                    std::lock_guard<std::mutex> rollback_lock(mutex_);
+                    --total_created_;
+                    cv_.notify_one();
+                    throw;
                 }
             }
 
@@ -274,20 +330,33 @@ public:
      * @return Optional handle - empty if no resource available
      */
     std::optional<ResourceHandle<T>> tryAcquire() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::mutex> lock(mutex_);
 
         if (shutdown_) {
             return std::nullopt;
         }
 
         if (!available_.empty()) {
-            auto resource = std::move(available_.front());
-            available_.pop();
+            auto resource = std::move(available_.back());
+            available_.pop_back();
 
-            // Validate if configured
-            if (config_.validate_on_acquire && validator_ && !validator_(*resource)) {
-                --total_created_;
-                return std::nullopt;
+            // Validate outside mutex
+            if (config_.validate_on_acquire && validator_) {
+                lock.unlock();
+                bool valid = false;
+                try {
+                    valid = validator_(*resource);
+                } catch (...) {
+                    valid = false;
+                }
+
+                if (!valid) {
+                    std::lock_guard<std::mutex> rollback_lock(mutex_);
+                    --total_created_;
+                    cv_.notify_one();
+                    return std::nullopt;
+                }
+                lock.lock();
             }
 
             auto return_func = [this](std::unique_ptr<T> res) {
@@ -299,12 +368,43 @@ public:
 
         // Try to create new resource if under limit
         if (total_created_ < config_.max_size) {
-            auto resource = createResourceLocked();
-            if (resource) {
+            ++total_created_;
+            lock.unlock();
+
+            try {
+                auto resource = factory_();
+                if (!resource) {
+                    std::lock_guard<std::mutex> rollback_lock(mutex_);
+                    --total_created_;
+                    cv_.notify_one();
+                    return std::nullopt;
+                }
+
+                if (validator_) {
+                    bool valid = false;
+                    try {
+                        valid = validator_(*resource);
+                    } catch (...) {
+                        valid = false;
+                    }
+                    if (!valid) {
+                        std::lock_guard<std::mutex> rollback_lock(mutex_);
+                        --total_created_;
+                        cv_.notify_one();
+                        return std::nullopt;
+                    }
+                }
+
                 auto return_func = [this](std::unique_ptr<T> res) {
                     this->returnResource(std::move(res));
                 };
                 return ResourceHandle<T>(std::move(resource), std::move(return_func));
+
+            } catch (...) {
+                std::lock_guard<std::mutex> rollback_lock(mutex_);
+                --total_created_;
+                cv_.notify_one();
+                return std::nullopt;
             }
         }
 
@@ -334,33 +434,36 @@ public:
     /**
      * @brief Gracefully shutdown the pool
      *
-     * Waits for all resources to be returned before destroying them.
-     * This is called automatically by the destructor.
+     * Immediately destroys all idle resources and prevents new acquisitions.
+     * In-use resources will be destroyed when returned (via RAII).
+     * Does not block - returns immediately after cleanup.
      */
     void shutdown() {
-        std::unique_lock<std::mutex> lock(mutex_);
+        std::vector<std::unique_ptr<T>> to_destroy;
+        size_t leaked_count = 0;
 
-        if (shutdown_) {
-            return;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+
+            if (shutdown_) {
+                return;
+            }
+
+            shutdown_ = true;
+
+            // Detect leaked handles (still in use)
+            leaked_count = total_created_ - available_.size();
+
+            // Move all idle resources for destruction outside mutex
+            to_destroy = std::move(available_);
+            available_.clear();
         }
 
-        shutdown_ = true;
+        // Notify all waiting threads
         cv_.notify_all();
 
-        // Wait for all resources to be returned with timeout
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-        while (available_.size() < total_created_) {
-            if (cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
-                // Force shutdown after timeout
-                break;
-            }
-        }
-
-        // Clean up all available resources
-        while (!available_.empty()) {
-            auto resource = std::move(available_.front());
-            available_.pop();
-
+        // Destroy idle resources outside mutex
+        for (auto& resource : to_destroy) {
             if (destroyer_) {
                 try {
                     destroyer_(*resource);
@@ -368,10 +471,54 @@ public:
                     // Swallow exceptions during cleanup
                 }
             }
-            // unique_ptr will handle deletion
         }
 
-        total_created_ = 0;
+        // Note: Leaked handles will be cleaned up via returnResource()
+        // when they eventually go out of scope (RAII handles this)
+    }
+
+    /**
+     * @brief Shutdown and wait for all resources to be returned
+     *
+     * Blocks until all resources are returned or timeout expires.
+     * Use this when you need to ensure all resources are properly released.
+     *
+     * @param timeout Maximum time to wait for resources
+     * @return true if all resources returned, false if timeout
+     */
+    bool shutdownAndWait(std::chrono::milliseconds timeout = std::chrono::seconds(30)) {
+        std::unique_lock<std::mutex> lock(mutex_);
+
+        if (shutdown_) {
+            return available_.size() == total_created_;
+        }
+
+        shutdown_ = true;
+        cv_.notify_all();
+
+        // Wait for all resources to be returned
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+        bool all_returned = cv_.wait_until(lock, deadline, [this] {
+            return available_.size() == total_created_;
+        });
+
+        // Clean up all available resources
+        std::vector<std::unique_ptr<T>> to_destroy = std::move(available_);
+        available_.clear();
+        size_t leaked = all_returned ? 0 : (total_created_ - to_destroy.size());
+
+        lock.unlock();
+
+        // Destroy outside mutex
+        for (auto& resource : to_destroy) {
+            if (destroyer_) {
+                try {
+                    destroyer_(*resource);
+                } catch (...) {}
+            }
+        }
+
+        return all_returned;
     }
 
     /**
@@ -398,29 +545,6 @@ public:
     }
 
 private:
-    /**
-     * @brief Create a new resource (must be called with lock held)
-     */
-    std::unique_ptr<T> createResourceLocked() {
-        auto resource = createResource();
-        return resource;
-    }
-
-    /**
-     * @brief Create a new resource (thread-safe)
-     */
-    std::unique_ptr<T> createResource() {
-        try {
-            auto resource = factory_();
-            if (!resource) {
-                throw PoolException("Factory returned null resource");
-            }
-            ++total_created_;
-            return resource;
-        } catch (const std::exception& e) {
-            throw PoolException(std::string("Failed to create resource: ") + e.what());
-        }
-    }
 
     /**
      * @brief Return a resource to the pool
@@ -430,32 +554,50 @@ private:
             return;
         }
 
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        if (shutdown_) {
-            // Pool is shutting down, destroy the resource
-            --total_created_;
-            if (destroyer_) {
-                try {
-                    destroyer_(*resource);
-                } catch (...) {}
-            }
-            cv_.notify_all();
-            return;
-        }
-
-        // Validate if configured
+        // Validate outside mutex to avoid blocking
+        bool valid = true;
         if (config_.validate_on_return && validator_) {
-            if (!validator_(*resource)) {
-                // Resource is invalid, don't return it to pool
-                --total_created_;
-                cv_.notify_all();
-                return;
+            try {
+                valid = validator_(*resource);
+            } catch (...) {
+                valid = false;
             }
         }
 
-        available_.push(std::move(resource));
-        cv_.notify_one();
+        std::unique_ptr<T> to_destroy;
+        bool should_notify = false;
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+
+            if (shutdown_) {
+                // Pool is shutting down, mark for destruction
+                --total_created_;
+                to_destroy = std::move(resource);
+                should_notify = true;
+            } else if (!valid) {
+                // Resource is invalid, mark for destruction
+                --total_created_;
+                to_destroy = std::move(resource);
+                should_notify = true;
+            } else {
+                // Return to pool (LIFO - push to back)
+                available_.push_back(std::move(resource));
+                should_notify = true;
+            }
+        }
+
+        // Destroy outside mutex if needed
+        if (to_destroy && destroyer_) {
+            try {
+                destroyer_(*to_destroy);
+            } catch (...) {}
+        }
+
+        // Notify waiting threads
+        if (should_notify) {
+            cv_.notify_one();
+        }
     }
 
     FactoryFunc factory_;
@@ -465,7 +607,7 @@ private:
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;
-    std::queue<std::unique_ptr<T>> available_;
+    std::vector<std::unique_ptr<T>> available_;  // LIFO for hot/cold pattern
     size_t total_created_;
     bool shutdown_;
 };

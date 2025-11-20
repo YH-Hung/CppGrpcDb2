@@ -1,113 +1,3 @@
-# Resource Pool (C++): Design and Usage
-
-This document describes the design, behavior, and usage of the generic, thread-safe `resource::ResourcePool<T>` implemented in `src/resource/resource_pool.hpp`.
-
-The pool is suitable for managing expensive, reusable resources such as database connections (e.g., `db2::Connection`), network clients, or other handles. It provides RAII semantics via `std::shared_ptr` with a custom deleter so that returning resources to the pool is automatic.
-
----
-
-## Key Features
-
-- Single resource type per pool via C++ templates: `ResourcePool<MyType>`
-- Bounded pool size (maximum concurrency) with:
-  - Blocking acquire (`acquire()`)
-  - Timed acquire (`acquire_for(...)`, `acquire_until(...)`)
-  - Non-blocking acquire (`try_acquire()`)
-- Automatic return to the pool when the `std::shared_ptr<T>` goes out of scope (custom deleter)
-- Optional resource validator to health-check resources on acquire/return
-- Safe shutdown to wake waiting threads and drain idle resources
-- Thread-safe under heavy concurrency; minimizes lock hold times during validation and construction
-
-## Design Overview
-
-### Ownership and RAII
-- The pool must be owned by a `std::shared_ptr` created via `ResourcePool::create(...)`.
-- Resources are handed out as `std::shared_ptr<T>` with a custom deleter that holds a `std::weak_ptr` back to the pool.
-- When the last `shared_ptr<T>` for a resource is destroyed, the deleter returns the resource to the pool if the pool still exists; otherwise, it deletes the resource.
-
-### Bounded Capacity and Counters
-- The pool tracks:
-  - `max_size_`: maximum number of resources allowed (in use + idle)
-  - `total_`: current number of resources created (in use + idle)
-  - `idle_`: vector of idle, reusable resources
-- If `max_size` passed to `create()` is 0, it is coerced to 1.
-
-### Factory and Validator
-- `Factory`: `std::function<std::unique_ptr<T>()>`, used to create new resources when needed.
-- `Validator` (optional): `std::function<bool(const T&)>`, used to check resource health.
-  - Validation is invoked in two cases:
-    - When taking a resource from the idle list
-    - When returning a resource to the pool
-  - Validator exceptions are caught and treated as a failed validation.
-  - Invalid resources are discarded and not returned to the pool; `total_` is decremented.
-
-### Synchronization Strategy
-- Internally uses `std::mutex` and `std::condition_variable`.
-- Validation and resource creation are performed outside the lock to avoid long critical sections and deadlocks.
-- Waiters block until either an idle resource is available, capacity allows creation, or shutdown occurs.
-
-### Shutdown Semantics
-- `shutdown()` marks the pool as shutting down, wakes all waiters, and destroys all idle resources.
-- `acquire()`/`acquire_until(...)` throw `std::runtime_error` if attempted while shutting down.
-- Resources currently in use are destroyed later when their `shared_ptr<T>` refcounts drop to zero.
-
----
-
-## API Overview
-
-Header: `src/resource/resource_pool.hpp`
-Namespace: `resource`
-
-- `static std::shared_ptr<ResourcePool> create(std::size_t max_size, Factory factory, Validator validator = {})`
-  - Constructs the pool; must be used (not a public constructor) so that deleters can reference the pool safely.
-- `SharedPtr acquire()`
-  - Blocks until a resource is available or can be created; throws if the pool is shutting down.
-- `SharedPtr try_acquire()`
-  - Non-blocking; returns `nullptr` if no idle resource is available and capacity is fully used.
-- `template<class Rep, class Period> SharedPtr acquire_for(std::chrono::duration<Rep, Period> timeout)`
-  - Blocks up to a duration; returns `nullptr` on timeout.
-- `template<class ClockT, class Dur> SharedPtr acquire_until(std::chrono::time_point<ClockT, Dur> deadline)`
-  - Blocks until a deadline; returns `nullptr` on timeout; throws if shutting down.
-- `void shutdown()`
-  - Wakes waiters and drains idle resources. In-use resources are returned as their `shared_ptr`s naturally destruct.
-- Observability (approximate under concurrency):
-  - `std::size_t max_size() const noexcept`
-  - `std::size_t total() const noexcept`
-  - `std::size_t idle_size() const noexcept`
-  - `std::size_t in_use() const noexcept`
-
----
-
-## Usage Examples
-
-### 1) Pool of DB2 connections
-
-```cpp
-#include <memory>
-#include "include/db2/db2.hpp"                 // db2::Connection
-#include "src/resource/resource_pool.hpp"      // resource::ResourcePool
-
-using resource::ResourcePool;
-
-int main() {
-  using db2::Connection;
-
-  // Factory: how to create a new DB2 connection
-  auto factory = []() {
-    auto conn = std::make_unique<Connection>();
-    conn->connect_with_conn_str(
-      "DATABASE=mydb;HOSTNAME=host;PORT=50000;PROTOCOL=TCPIP;UID=user;PWD=pass;"
-    );
-    return conn;
-  };
-
-  // Optional validator: ensure the connection is still alive
-  auto validator = [](const Connection& c) noexcept {
-    return c.is_connected();
-  };
-
-  // Create a pool with up to 8 concurrent connections
-  auto pool = ResourcePool<Connection>::create(8, factory, validator);
 
   // Acquire a connection (blocking). Returned as shared_ptr<Connection>.
   auto conn = pool->acquire();
@@ -216,3 +106,26 @@ int main() {
 - This document: `doc/resource_pool.md`
 
 If you have questions or find edge cases not covered here, please open an issue or add notes to this document.
+
+### 2) Warm-up the pool on startup
+
+Warm-up avoids first-request latency by pre-creating a number of resources:
+
+```cpp
+#include "src/resource/resource_pool.hpp"
+
+using resource::ResourcePool;
+
+// ... define factory and optional validator ...
+
+auto pool = ResourcePool<Connection>::create(
+  /*max_size=*/16,
+  factory,
+  validator,
+  /*warmup_size=*/4 // pre-create 4 connections now
+);
+```
+
+Notes:
+- `warmup_size` is capped at `max_size`.
+- If validator rejects during warm-up, creation throws and no partial state is committed.

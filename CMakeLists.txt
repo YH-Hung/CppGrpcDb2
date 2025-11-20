@@ -274,4 +274,22 @@ if(BUILD_DB2_TESTS)
     add_test(NAME db2_wrapper_tests COMMAND db2_wrapper_tests)
 
     target_compile_features(db2_wrapper_tests PRIVATE cxx_std_20)
+
+    # Resource pool refactoring tests
+    add_executable(resource_handle_refactor_tests
+        tests/resource/test_resource_handle_refactor.cpp
+    )
+
+    target_include_directories(resource_handle_refactor_tests
+        PRIVATE ${PROJECT_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(resource_handle_refactor_tests
+        PRIVATE GTest::gtest
+        PRIVATE GTest::gtest_main
+    )
+
+    add_test(NAME resource_handle_refactor_tests COMMAND resource_handle_refactor_tests)
+
+    target_compile_features(resource_handle_refactor_tests PRIVATE cxx_std_20)
 endif()

@@ -54,13 +54,21 @@ public:
   using Validator = std::function<bool(const T&)>;                // check health
 
   // Create a pool wrapped in std::shared_ptr to enable RAII return via deleter
+  // Optional warmup_size pre-allocates up to N resources eagerly (validated)
+  // before returning. If creation/validation fails during warm-up, this
+  // function throws and the pool is not created.
   static std::shared_ptr<ResourcePool> create(std::size_t max_size,
                                               Factory factory,
-                                              Validator validator = {}) {
+                                              Validator validator = {},
+                                              std::size_t warmup_size = 0) {
     if (!factory) {
       throw std::invalid_argument("ResourcePool: factory must not be empty");
     }
-    return std::shared_ptr<ResourcePool>(new ResourcePool(max_size, std::move(factory), std::move(validator)));
+    auto sp = std::shared_ptr<ResourcePool>(new ResourcePool(max_size, std::move(factory), std::move(validator)));
+    if (warmup_size > 0) {
+      sp->perform_warmup(warmup_size);
+    }
+    return sp;
   }
 
   // Non-copyable / non-movable (pool should have stable address for deleters)
@@ -161,6 +169,45 @@ private:
       }
     }
   };
+
+  // Eagerly create up to warmup_size resources and place them into idle_.
+  // Throws if factory fails or validator rejects any created resource; in that
+  // case, no state is committed to the pool (strong exception safety).
+  void perform_warmup(std::size_t warmup_size) {
+    if (warmup_size == 0) return;
+    const std::size_t target = std::min<std::size_t>(warmup_size, max_size_);
+    std::vector<UniquePtr> created;
+    created.reserve(target);
+
+    for (std::size_t i = 0; i < target; ++i) {
+      UniquePtr u = factory_();
+      if (!u) {
+        throw std::runtime_error("ResourcePool warm-up: factory returned null");
+      }
+      if (validator_) {
+        bool ok = false;
+        try {
+          ok = validator_(*u);
+        } catch (...) {
+          ok = false;
+        }
+        if (!ok) {
+          throw std::runtime_error("ResourcePool warm-up: validator rejected created resource");
+        }
+      }
+      created.push_back(std::move(u));
+    }
+
+    // Commit created resources to the pool atomically under the mutex
+    {
+      std::lock_guard<std::mutex> lk(mtx_);
+      for (auto& u : created) {
+        idle_.push_back(std::move(u));
+      }
+      total_ += target;
+    }
+    cv_.notify_all();
+  }
 
   SharedPtr make_shared_from_unique_unlocked(std::unique_ptr<T> u, std::unique_lock<std::mutex>& lk) {
     T* raw = u.release();
