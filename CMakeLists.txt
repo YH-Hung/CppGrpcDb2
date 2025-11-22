@@ -25,6 +25,9 @@ include(cmake/prometheus.cmake)
 # Resolve utf8ansi library (installed under $HOME/.local by default)
 include(cmake/utf8ansi.cmake)
 
+# Resolve OpenTelemetry library
+include(cmake/opentelemetry.cmake)
+
 # Include common helper functions
 include(cmake/common.cmake)
 
@@ -137,6 +140,25 @@ target_link_libraries(metrics_interceptor
 
 target_compile_features(metrics_interceptor PUBLIC cxx_std_20)
 
+# Tracing interceptor library
+add_library(tracing_interceptor
+    src/tracing/tracer_provider.cpp
+    src/tracing/grpc_tracing_interceptor.cpp
+)
+
+target_include_directories(tracing_interceptor
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PUBLIC "${generated_dir}"
+)
+
+target_link_libraries(tracing_interceptor
+    PUBLIC ${OPENTELEMETRY_LIBS}
+    PUBLIC ${_GRPC_GRPCPP}
+    PUBLIC spdlog::spdlog
+)
+
+target_compile_features(tracing_interceptor PUBLIC cxx_std_20)
+
 # ==============================================================================
 # DB2 Wrapper Library
 # ==============================================================================
@@ -203,6 +225,40 @@ target_link_libraries(test_string_interceptor
 )
 
 target_compile_features(test_string_interceptor PRIVATE cxx_std_20)
+
+# Test for TracerProvider initialization
+add_executable(test_tracer_init
+    src/test_tracer_init.cpp
+)
+
+target_include_directories(test_tracer_init
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_tracer_init
+    PRIVATE tracing_interceptor
+    PRIVATE spdlog::spdlog
+)
+
+target_compile_features(test_tracer_init PRIVATE cxx_std_20)
+
+# Test for TracerProvider initialization with gRPC
+add_executable(test_tracer_grpc
+    src/test_tracer_grpc.cpp
+)
+
+target_include_directories(test_tracer_grpc
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_tracer_grpc
+    PRIVATE tracing_interceptor
+    PRIVATE ${_GRPC_GRPCPP}
+    PRIVATE ${_REFLECTION}
+    PRIVATE spdlog::spdlog
+)
+
+target_compile_features(test_tracer_grpc PRIVATE cxx_std_20)
 
 # Test server without DB2 dependency
 add_executable(greeter_callback_server_no_db2

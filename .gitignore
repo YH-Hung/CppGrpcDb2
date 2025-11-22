@@ -39,3 +39,16 @@
 .DS_Store
 
 /cmake-build-verify
+/cmake-build-debug
+/cmake-build-release
+
+# Environment and logs
+*.log
+.env
+.env.*
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~

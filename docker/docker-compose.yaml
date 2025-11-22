@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # All-in-one observability stack: Grafana, Tempo, Loki, Prometheus
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: otel-lgtm
+    ports:
+      # Grafana UI
+      - "3000:3000"
+      # OTLP gRPC receiver
+      - "4317:4317"
+      # OTLP HTTP receiver
+      - "4318:4318"
+      # Prometheus (optional)
+      - "9090:9090"
+    environment:
+      # Enable all features
+      - OTEL_METRIC_EXPORT_INTERVAL=1000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+    volumes:
+      # Mount custom collector configuration
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Optional: Standalone Tempo for advanced trace storage
+  # Uncomment if you need separate Tempo instance
+  # tempo:
+  #   image: grafana/tempo:latest
+  #   container_name: tempo
+  #   command: [ "-config.file=/etc/tempo.yaml" ]
+  #   volumes:
+  #     - ./tempo-config.yaml:/etc/tempo.yaml:ro
+  #     - tempo-data:/tmp/tempo
+  #   ports:
+  #     - "3200:3200"  # Tempo HTTP
+  #     - "4317:4317"  # OTLP gRPC
+  #   networks:
+  #     - observability
+
+networks:
+  observability:
+    driver: bridge
+
+volumes:
+  tempo-data:

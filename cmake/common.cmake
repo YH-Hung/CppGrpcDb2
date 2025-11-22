@@ -16,6 +16,7 @@ function(create_grpc_executable target_name source_file)
         PRIVATE ${_PROTOBUF_LIBPROTOBUF}
         PRIVATE spdlog::spdlog
         PRIVATE prometheus-cpp::pull
+        PRIVATE tracing_interceptor  # OpenTelemetry tracing support
     )
 
     # Set C++20 standard

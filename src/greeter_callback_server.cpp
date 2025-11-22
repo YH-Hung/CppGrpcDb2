@@ -27,6 +27,8 @@
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
 #include "metrics_interceptor.h"
+#include "tracing/tracer_provider.h"
+#include "tracing/grpc_tracing_interceptor.h"
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -132,11 +134,19 @@ void RunServer(uint16_t port) {
   // clients. In this case it corresponds to an *synchronous* service.
   builder.RegisterService(&service);
   
-  // Register the string transformation interceptor factory and metrics factory
-  auto metrics_factory = std::make_unique<MetricsServerInterceptorFactory>(registry);
+  // Register interceptor factories (tracing + string transformation + metrics)
   std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
+
+  // Add tracing interceptor (runs first for complete span coverage)
+  interceptors.push_back(std::make_unique<tracing::ServerTracingInterceptorFactory>());
+
+  // Add string transformation interceptor
   interceptors.push_back(std::move(interceptor_factory));
+
+  // Add metrics interceptor
+  auto metrics_factory = std::make_unique<MetricsServerInterceptorFactory>(registry);
   interceptors.push_back(std::move(metrics_factory));
+
   builder.experimental().SetInterceptorCreators(std::move(interceptors));
   
   // Finally assemble the server.
@@ -149,6 +159,14 @@ void RunServer(uint16_t port) {
 }
 
 int main(int argc, char** argv) {
+  // Initialize OpenTelemetry tracing
+  tracing::TracerProvider::Initialize();
+
+  // Run the gRPC server
   RunServer(50051);
+
+  // Shutdown tracing and flush pending spans
+  tracing::TracerProvider::Shutdown();
+
   return 0;
 }

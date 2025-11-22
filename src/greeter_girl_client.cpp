@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 #include "hello_girl.grpc.pb.h"
+#include "tracing/tracer_provider.h"
+#include "tracing/grpc_tracing_interceptor.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -54,9 +56,13 @@ private:
 };
 
 int main(int argc, char** argv) {
+    // Initialize OpenTelemetry tracing
+    tracing::TracerProvider::Initialize();
+
     std::string target_str = "localhost:50051";
+    // Create a traced channel with automatic span creation and context propagation
     GirlGreeterClient client(
-        grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
+        tracing::CreateTracedChannel(target_str, grpc::InsecureChannelCredentials()));
 
     // Example values similar to greeter_client.cpp style
     std::string name = "賴柔瑤";
@@ -65,6 +71,9 @@ int main(int argc, char** argv) {
 
     auto reply = client.SayHello(name, spouse, first_round);
     std::cout << "GirlGreeter received:\n" << reply << std::endl;
+
+    // Shutdown tracing and flush pending spans
+    tracing::TracerProvider::Shutdown();
 
     return 0;
 }

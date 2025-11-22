@@ -1,0 +1,68 @@
+# OpenTelemetry Collector Configuration
+# This configuration receives traces from the C++ gRPC application
+# and exports them to Tempo (part of grafana/otel-lgtm stack)
+
+receivers:
+  # OTLP receiver for gRPC protocol (primary)
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch processor for better performance
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Resource detection to add host information
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 5s
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+exporters:
+  # Export to Tempo (traces backend in grafana/otel-lgtm)
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Logging exporter for debugging
+  logging:
+    loglevel: debug
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # Prometheus exporter for collector metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+service:
+  # Collector's own telemetry
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888
+
+  pipelines:
+    # Trace pipeline
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/tempo, logging]
+
+    # Metrics pipeline (for collector self-monitoring)
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus, logging]

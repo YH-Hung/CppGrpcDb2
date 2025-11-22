@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 #include "helloworld.grpc.pb.h"
+#include "tracing/tracer_provider.h"
+#include "tracing/grpc_tracing_interceptor.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -49,15 +51,20 @@ private:
 };
 
 int main(int argc, char** argv) {
+    // Initialize OpenTelemetry tracing
+    tracing::TracerProvider::Initialize();
+
     std::string target_str = "localhost:50051";
-    // We indicate that the channel isn't authenticated (use of
-    // InsecureChannelCredentials()).
+    // Create a traced channel with automatic span creation and context propagation
     GreeterClient greeter(
-        grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
+        tracing::CreateTracedChannel(target_str, grpc::InsecureChannelCredentials()));
     // std::string user("賴柔瑤");
     std::string user("黃美晴");
     std::string reply = greeter.SayHello(user);
     std::cout << "Greeter received: " << reply << std::endl;
+
+    // Shutdown tracing and flush pending spans
+    tracing::TracerProvider::Shutdown();
 
     return 0;
 }
