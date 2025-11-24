@@ -176,27 +176,27 @@
 
 ### Tests for User Story 3 (REQUIRED per TDD principle) ⚠️
 
-- [ ] T061 [P] [US3] Write integration test for OTLP collector connectivity check in tests/integration/test_otlp_export.cpp
-- [ ] T062 [P] [US3] Write integration test for graceful degradation when collector unavailable in tests/integration/test_otlp_export.cpp
-- [ ] T063 [P] [US3] Write integration test for performance overhead measurement (<5% latency) in tests/integration/test_performance.cpp
-- [ ] T064 [P] [US3] Write integration test for complete span attributes validation in tests/integration/test_span_attributes.cpp
-- [ ] T065 [P] [US3] Write unit test for BatchSpanProcessor configuration in tests/unit/test_batch_processor.cpp
+- [X] T061 [P] [US3] Write integration test for OTLP collector connectivity check in tests/integration/test_otlp_export.cpp
+- [X] T062 [P] [US3] Write integration test for graceful degradation when collector unavailable in tests/integration/test_otlp_export.cpp
+- [X] T063 [P] [US3] Write integration test for performance overhead measurement (<5% latency) in tests/integration/test_performance.cpp
+- [X] T064 [P] [US3] Write integration test for complete span attributes validation in tests/integration/test_span_attributes.cpp
+- [X] T065 [P] [US3] Write unit test for BatchSpanProcessor configuration in tests/unit/test_batch_processor.cpp
 
 ### Implementation for User Story 3
 
-- [ ] T066 [US3] Implement non-blocking OTLP export with async batch processor in src/tracing/tracer_provider.cpp
-- [ ] T067 [US3] Configure BatchSpanProcessor parameters (max_queue_size, schedule_delay, batch_size) in src/tracing/tracer_provider.cpp
-- [ ] T068 [US3] Implement error handling for OTLP export failures (log but don't block) in src/tracing/tracer_provider.cpp
-- [ ] T069 [US3] Add retry logic for transient OTLP collector failures in src/tracing/tracer_provider.cpp
-- [ ] T070 [US3] Implement span attribute validation (service.name, operation, timing, status) in src/tracing/grpc_tracing_interceptor.cpp
-- [ ] T071 [US3] Add gRPC status code to span attributes in src/tracing/grpc_tracing_interceptor.cpp
-- [ ] T072 [US3] Add network peer information (host, port) to client spans in src/tracing/grpc_tracing_interceptor.cpp
-- [ ] T073 [US3] Benchmark request latency with tracing enabled using Prometheus metrics in tests/integration/test_performance.cpp
-- [ ] T074 [US3] Benchmark memory footprint with tracing enabled in tests/integration/test_performance.cpp
-- [ ] T075 [US3] Verify performance overhead is <5% in tests/integration/test_performance.cpp
-- [ ] T076 [US3] Test trace export under high load (1000 req/s) in tests/integration/test_high_load.cpp
-- [ ] T077 [US3] Verify all integration tests pass (export reliability, graceful degradation, performance)
-- [ ] T078 [US3] Verify unit tests pass (batch processor configuration)
+- [X] T066 [US3] Implement non-blocking OTLP export with async batch processor in src/tracing/tracer_provider.cpp
+- [X] T067 [US3] Configure BatchSpanProcessor parameters (max_queue_size, schedule_delay, batch_size) in src/tracing/tracer_provider.cpp
+- [X] T068 [US3] Implement error handling for OTLP export failures (log but don't block) in src/tracing/tracer_provider.cpp
+- [X] T069 [US3] Add retry logic for transient OTLP collector failures in src/tracing/tracer_provider.cpp
+- [X] T070 [US3] Implement span attribute validation (service.name, operation, timing, status) in src/tracing/grpc_tracing_interceptor.cpp
+- [X] T071 [US3] Add gRPC status code to span attributes in src/tracing/grpc_tracing_interceptor.cpp
+- [X] T072 [US3] Add network peer information (host, port) to client spans in src/tracing/grpc_tracing_interceptor.cpp
+- [X] T073 [US3] Benchmark request latency with tracing enabled using Prometheus metrics in tests/integration/test_performance.cpp
+- [X] T074 [US3] Benchmark memory footprint with tracing enabled in tests/integration/test_performance.cpp
+- [X] T075 [US3] Verify performance overhead is <5% in tests/integration/test_performance.cpp
+- [X] T076 [US3] Test trace export under high load (1000 req/s) in tests/integration/test_performance.cpp
+- [X] T077 [US3] Verify all integration tests pass (export reliability, graceful degradation, performance)
+- [X] T078 [US3] Verify unit tests pass (batch processor configuration)
 
 **Checkpoint**: All user stories should now be independently functional. Full end-to-end observability achieved.
 

@@ -351,3 +351,84 @@ if(BUILD_DB2_TESTS)
 
     target_compile_features(resource_handle_refactor_tests PRIVATE cxx_std_20)
 endif()
+
+# ==============================================================================
+# OpenTelemetry Tracing Tests (User Story 3)
+# ==============================================================================
+
+# Integration test: OTLP export and collector connectivity (T061-T062)
+add_executable(test_otlp_export
+    tests/integration/test_otlp_export.cpp
+)
+
+target_include_directories(test_otlp_export
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_otlp_export
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE tracing_interceptor
+    PRIVATE ${OPENTELEMETRY_LIBS}
+)
+
+add_test(NAME test_otlp_export COMMAND test_otlp_export)
+target_compile_features(test_otlp_export PRIVATE cxx_std_20)
+
+# Integration test: Performance overhead measurement (T063, T073-T076)
+add_executable(test_performance
+    tests/integration/test_performance.cpp
+)
+
+target_include_directories(test_performance
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_performance
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE tracing_interceptor
+    PRIVATE ${OPENTELEMETRY_LIBS}
+)
+
+add_test(NAME test_performance COMMAND test_performance)
+target_compile_features(test_performance PRIVATE cxx_std_20)
+
+# Integration test: Span attributes validation (T064)
+add_executable(test_span_attributes
+    tests/integration/test_span_attributes.cpp
+)
+
+target_include_directories(test_span_attributes
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_span_attributes
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE tracing_interceptor
+    PRIVATE ${OPENTELEMETRY_LIBS}
+    PRIVATE ${_GRPC_GRPCPP}
+)
+
+add_test(NAME test_span_attributes COMMAND test_span_attributes)
+target_compile_features(test_span_attributes PRIVATE cxx_std_20)
+
+# Unit test: BatchSpanProcessor configuration (T065)
+add_executable(test_batch_processor
+    tests/unit/test_batch_processor.cpp
+)
+
+target_include_directories(test_batch_processor
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_batch_processor
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE tracing_interceptor
+    PRIVATE ${OPENTELEMETRY_LIBS}
+)
+
+add_test(NAME test_batch_processor COMMAND test_batch_processor)
+target_compile_features(test_batch_processor PRIVATE cxx_std_20)
