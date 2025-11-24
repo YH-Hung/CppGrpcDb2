@@ -29,6 +29,7 @@
 #include "metrics_interceptor.h"
 #include "tracing/tracer_provider.h"
 #include "tracing/grpc_tracing_interceptor.h"
+#include "tracing/trace_log_formatter.h"
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -161,6 +162,9 @@ void RunServer(uint16_t port) {
 int main(int argc, char** argv) {
   // Initialize OpenTelemetry tracing
   tracing::TracerProvider::Initialize();
+
+  // Set up trace-aware logging (inject trace_id and span_id into logs)
+  tracing::SetTraceLogging();
 
   // Run the gRPC server
   RunServer(50051);

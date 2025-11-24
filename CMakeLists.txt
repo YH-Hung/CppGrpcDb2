@@ -256,6 +256,7 @@ target_link_libraries(test_tracer_grpc
     PRIVATE ${_GRPC_GRPCPP}
     PRIVATE ${_REFLECTION}
     PRIVATE spdlog::spdlog
+    PRIVATE absl::flags_parse
 )
 
 target_compile_features(test_tracer_grpc PRIVATE cxx_std_20)
@@ -279,6 +280,7 @@ target_link_libraries(greeter_callback_server_no_db2
     PRIVATE spdlog::spdlog
     PRIVATE string_transform_interceptor
     PRIVATE utf8ansi::utf8ansi
+    PRIVATE tracing_interceptor
 )
 
 target_compile_features(greeter_callback_server_no_db2 PRIVATE cxx_std_20)

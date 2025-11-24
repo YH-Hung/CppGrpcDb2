@@ -20,6 +20,9 @@
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
 #include "utf8ansi.h"
+#include "tracing/tracer_provider.h"
+#include "tracing/grpc_tracing_interceptor.h"
+#include "tracing/trace_log_formatter.h"
 
 using grpc::CallbackServerContext;
 using grpc::Server;
@@ -115,9 +118,16 @@ void RunServer(uint16_t port) {
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
   builder.RegisterService(&service);
   
-  // Register the string transformation interceptor factory
+  // Register interceptor factories (tracing must be first to capture all operations)
   std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
+
+  // Add tracing interceptor first to capture complete request lifecycle
+  auto tracing_factory = std::make_unique<tracing::ServerTracingInterceptorFactory>();
+  interceptors.push_back(std::move(tracing_factory));
+
+  // Add string transformation interceptor
   interceptors.push_back(std::move(interceptor_factory));
+
   builder.experimental().SetInterceptorCreators(std::move(interceptors));
 
   // Block SIGINT/SIGTERM in main thread, will handle them in signal_waiter
@@ -141,11 +151,21 @@ void RunServer(uint16_t port) {
 }
 
 int main(int argc, char** argv) {
+  // Initialize OpenTelemetry tracing
+  tracing::TracerProvider::Initialize();
+
+  // Set up trace-aware logging (inject trace_id and span_id into logs)
+  tracing::SetTraceLogging();
+
   uint16_t port = 50051;
   if (argc > 1) {
     port = static_cast<uint16_t>(std::stoi(argv[1]));
   }
   RunServer(port);
+
+  // Shutdown tracing and flush pending spans
+  tracing::TracerProvider::Shutdown();
+
   return 0;
 }
 
