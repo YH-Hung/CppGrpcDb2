@@ -77,10 +77,19 @@ void TracerProvider::Initialize() {
         spdlog::debug("Configuring OTLP HTTP exporter...");
         opentelemetry::exporter::otlp::OtlpHttpExporterOptions exporter_options;
         // Convert endpoint to HTTP format (OTLP HTTP uses port 4318 by default)
-        // If endpoint is "localhost:4317" (gRPC port), convert to "http://localhost:4318/v1/traces"
-        if (otlp_endpoint == "localhost:4317") {
+        // If endpoint already starts with http:// or https://, use as-is and append /v1/traces if needed
+        if (otlp_endpoint.find("http://") == 0 || otlp_endpoint.find("https://") == 0) {
+            // Endpoint already has protocol
+            if (otlp_endpoint.find("/v1/traces") == std::string::npos) {
+                exporter_options.url = otlp_endpoint + "/v1/traces";
+            } else {
+                exporter_options.url = otlp_endpoint;
+            }
+        } else if (otlp_endpoint == "localhost:4317") {
+            // Convert gRPC port to HTTP port
             exporter_options.url = "http://localhost:4318/v1/traces";
         } else {
+            // Add protocol prefix
             exporter_options.url = "http://" + otlp_endpoint + "/v1/traces";
         }
         exporter_options.timeout = std::chrono::seconds(10);

@@ -236,6 +236,81 @@ make test
 ```
 
 Instead of build and run in terminal, clion test run will make your life much easier.
+## OpenTelemetry Distributed Tracing
+
+This project integrates OpenTelemetry for distributed tracing across gRPC services.
+
+### Quick Start
+
+**1. Start OTLP Collector (Grafana Stack)**
+
+```bash
+docker run -d --name otel-lgtm \
+  -p 3000:3000 -p 4318:4318 \
+  grafana/otel-lgtm:latest
+```
+
+**2. Configure Environment**
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
+export OTEL_SERVICE_NAME="greeter_server"
+```
+
+**3. Run Application**
+
+```bash
+cd build
+./greeter_server
+```
+
+**4. View Traces**
+
+Open http://localhost:3000 → Explore → Tempo → Search for service `greeter_server`
+
+### Features
+
+- **Automatic instrumentation**: gRPC interceptors create spans for all RPC calls
+- **W3C trace context propagation**: Standard traceparent/tracestate headers
+- **Log correlation**: Automatic trace_id/span_id injection in logs via spdlog formatter
+- **OTLP HTTP export**: Non-blocking async batch export to collector
+- **Performance**: <5% latency overhead, <10MB memory footprint
+
+### Configuration
+
+Environment variables:
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP collector endpoint (default: http://localhost:4318)
+- `OTEL_SERVICE_NAME`: Service name for resource attributes (default: cpp-grpc-service)
+- `OTEL_RESOURCE_ATTRIBUTES`: Additional resource attributes (e.g., `deployment.environment=prod`)
+
+### Documentation
+
+- **Full design doc**: [doc/opentelemetry_tracing.md](doc/opentelemetry_tracing.md)
+- **Quickstart guide**: [specs/001-otel-grpc-tracing/quickstart.md](specs/001-otel-grpc-tracing/quickstart.md)
+- **Trace context contract**: [specs/001-otel-grpc-tracing/contracts/trace-context-propagation.md](specs/001-otel-grpc-tracing/contracts/trace-context-propagation.md)
+
+### Custom Spans (Optional)
+
+```cpp
+#include "tracing/tracer_provider.h"
+
+auto tracer = tracing::TracerProvider::GetTracer("my-component");
+auto span = tracer->StartSpan("operation_name");
+auto scope = opentelemetry::trace::Scope(span);
+
+// Add attributes
+span->SetAttribute("user.id", user_id);
+
+// Do work
+PerformOperation();
+
+// Span automatically ends when it goes out of scope
+```
+
+See [design doc section 6](doc/opentelemetry_tracing.md#6-custom-span-creation-optional) for more examples.
+
+---
+
 ## Prometheus metrics
 
 This project exposes basic Prometheus metrics for the gRPC servers via a server interceptor and a Prometheus HTTP exposer.

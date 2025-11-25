@@ -566,6 +566,255 @@ if (error) {
 span->End();  // Or use RAII Scope pattern
 ```
 
+**Example 1: Database Query Tracing**
+
+```cpp
+#include "tracing/tracer_provider.h"
+#include <opentelemetry/trace/span.h>
+
+void QueryDatabase(const std::string& sql) {
+    // Get tracer instance
+    auto tracer = tracing::TracerProvider::GetTracer("database-layer", "1.0");
+
+    // Create span with specific options
+    opentelemetry::trace::StartSpanOptions options;
+    options.kind = opentelemetry::trace::SpanKind::kClient;
+    auto span = tracer->StartSpan("DB2Query", options);
+
+    // Activate span for log correlation
+    auto scope = opentelemetry::trace::Scope(span);
+
+    // Add semantic attributes (OpenTelemetry database conventions)
+    span->SetAttribute("db.system", "db2");
+    span->SetAttribute("db.statement", sql);
+    span->SetAttribute("db.name", "production_db");
+    span->SetAttribute("db.user", "app_user");
+
+    // Add event when connection acquired
+    span->AddEvent("Connection acquired from pool", {
+        {"pool.size", 10},
+        {"pool.idle", 3}
+    });
+
+    try {
+        // Execute query
+        auto result = ExecuteSQLQuery(sql);
+
+        // Add result attributes
+        span->SetAttribute("db.rows_affected", result.row_count);
+        span->SetStatus(opentelemetry::trace::StatusCode::kOk);
+
+        // Add event for query completion
+        span->AddEvent("Query completed successfully");
+
+    } catch (const std::exception& e) {
+        // Record exception details
+        span->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
+        span->SetAttribute("exception.type", typeid(e).name());
+        span->SetAttribute("exception.message", e.what());
+        span->AddEvent("Query failed");
+        throw;
+    }
+
+    // Span automatically ends when it goes out of scope (RAII)
+}
+```
+
+**Example 2: Nested Spans for Complex Operations**
+
+```cpp
+void ProcessOrder(const Order& order) {
+    auto tracer = tracing::TracerProvider::GetTracer("order-service");
+
+    // Parent span for entire order processing
+    auto parent_span = tracer->StartSpan("ProcessOrder");
+    auto parent_scope = opentelemetry::trace::Scope(parent_span);
+
+    parent_span->SetAttribute("order.id", order.id);
+    parent_span->SetAttribute("order.total", order.total_amount);
+
+    try {
+        // Child span 1: Validate order
+        {
+            auto validate_span = tracer->StartSpan("ValidateOrder");
+            auto validate_scope = opentelemetry::trace::Scope(validate_span);
+            ValidateOrderDetails(order);
+            validate_span->SetStatus(opentelemetry::trace::StatusCode::kOk);
+        }
+
+        // Child span 2: Check inventory
+        {
+            auto inventory_span = tracer->StartSpan("CheckInventory");
+            auto inventory_scope = opentelemetry::trace::Scope(inventory_span);
+            inventory_span->SetAttribute("items.count", order.items.size());
+
+            bool available = CheckInventoryAvailability(order);
+            inventory_span->SetAttribute("inventory.available", available);
+
+            if (!available) {
+                inventory_span->SetStatus(opentelemetry::trace::StatusCode::kError,
+                                         "Insufficient inventory");
+                throw std::runtime_error("Out of stock");
+            }
+            inventory_span->SetStatus(opentelemetry::trace::StatusCode::kOk);
+        }
+
+        // Child span 3: Process payment
+        {
+            auto payment_span = tracer->StartSpan("ProcessPayment");
+            auto payment_scope = opentelemetry::trace::Scope(payment_span);
+            payment_span->SetAttribute("payment.method", order.payment_method);
+            payment_span->SetAttribute("payment.amount", order.total_amount);
+
+            auto transaction_id = ProcessPayment(order);
+            payment_span->SetAttribute("payment.transaction_id", transaction_id);
+            payment_span->SetStatus(opentelemetry::trace::StatusCode::kOk);
+        }
+
+        parent_span->SetStatus(opentelemetry::trace::StatusCode::kOk);
+        parent_span->AddEvent("Order processed successfully");
+
+    } catch (const std::exception& e) {
+        parent_span->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
+        parent_span->AddEvent("Order processing failed", {
+            {"error.message", e.what()}
+        });
+        throw;
+    }
+}
+```
+
+**Example 3: Async Operations with Manual Span Management**
+
+```cpp
+#include <future>
+
+std::future<Response> AsyncRPCCall(const Request& request) {
+    auto tracer = tracing::TracerProvider::GetTracer("async-client");
+
+    // Create span before async operation
+    auto span = tracer->StartSpan("AsyncRPC");
+    span->SetAttribute("request.id", request.id);
+
+    // Important: Get current context to propagate to async task
+    auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+
+    return std::async(std::launch::async, [span, current_ctx, request]() {
+        // Restore context in async thread
+        auto token = opentelemetry::context::RuntimeContext::Attach(current_ctx);
+
+        try {
+            // Make RPC call
+            auto response = MakeRPCCall(request);
+
+            span->SetAttribute("response.size", response.size());
+            span->SetStatus(opentelemetry::trace::StatusCode::kOk);
+            span->End();  // Manually end span
+
+            return response;
+
+        } catch (const std::exception& e) {
+            span->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
+            span->End();
+            throw;
+        }
+    });
+}
+```
+
+**Example 4: Custom Attributes for Business Metrics**
+
+```cpp
+void HandleUserRequest(const UserRequest& req) {
+    auto tracer = tracing::TracerProvider::GetTracer("user-handler");
+    auto span = tracer->StartSpan("HandleUserRequest");
+    auto scope = opentelemetry::trace::Scope(span);
+
+    // User context attributes
+    span->SetAttribute("user.id", req.user_id);
+    span->SetAttribute("user.role", req.user_role);
+    span->SetAttribute("user.subscription_tier", req.subscription_tier);
+
+    // Request metadata
+    span->SetAttribute("request.path", req.path);
+    span->SetAttribute("request.method", req.method);
+    span->SetAttribute("request.size_bytes", req.body.size());
+
+    // Feature flags
+    span->SetAttribute("feature.new_ui_enabled", IsFeatureEnabled("new_ui"));
+    span->SetAttribute("feature.cache_enabled", IsFeatureEnabled("cache"));
+
+    // Performance tracking
+    auto start = std::chrono::steady_clock::now();
+
+    auto response = ProcessRequest(req);
+
+    auto end = std::chrono::steady_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    // Response metrics
+    span->SetAttribute("response.status_code", response.status_code);
+    span->SetAttribute("response.size_bytes", response.body.size());
+    span->SetAttribute("processing.duration_ms", duration_ms);
+
+    // Add events for key operations
+    span->AddEvent("Cache lookup", {{"cache.hit", response.from_cache}});
+    span->AddEvent("Database query", {{"query.count", response.db_queries}});
+
+    span->SetStatus(opentelemetry::trace::StatusCode::kOk);
+}
+```
+
+**Example 5: Error Handling and Status Codes**
+
+```cpp
+void RiskyOperation() {
+    auto tracer = tracing::TracerProvider::GetTracer("risky-service");
+    auto span = tracer->StartSpan("RiskyOperation");
+    auto scope = opentelemetry::trace::Scope(span);
+
+    try {
+        // Attempt operation
+        DoRiskyThing();
+        span->SetStatus(opentelemetry::trace::StatusCode::kOk);
+
+    } catch (const ValidationError& e) {
+        // Expected error - not fatal
+        span->SetStatus(opentelemetry::trace::StatusCode::kError,
+                       "Validation failed");
+        span->SetAttribute("error.type", "validation_error");
+        span->SetAttribute("error.field", e.field_name);
+        span->AddEvent("Validation error", {
+            {"field", e.field_name},
+            {"reason", e.reason}
+        });
+        throw;
+
+    } catch (const DatabaseError& e) {
+        // Infrastructure error - critical
+        span->SetStatus(opentelemetry::trace::StatusCode::kError,
+                       "Database failure");
+        span->SetAttribute("error.type", "database_error");
+        span->SetAttribute("error.severity", "critical");
+        span->SetAttribute("db.error_code", e.error_code);
+        span->AddEvent("Database error", {
+            {"error_code", e.error_code},
+            {"error_message", e.what()}
+        });
+        throw;
+
+    } catch (const std::exception& e) {
+        // Unknown error
+        span->SetStatus(opentelemetry::trace::StatusCode::kError,
+                       "Unknown error");
+        span->SetAttribute("error.type", "unknown");
+        span->SetAttribute("exception.type", typeid(e).name());
+        span->SetAttribute("exception.message", e.what());
+        throw;
+    }
+}
+```
+
 ---
 
 ## Testing Strategy

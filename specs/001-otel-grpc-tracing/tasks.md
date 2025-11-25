@@ -206,21 +206,21 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T079 [P] Write design document doc/opentelemetry_tracing.md explaining architecture
-- [ ] T080 [P] Add API documentation comments to include/tracing/tracer_provider.h
-- [ ] T081 [P] Add API documentation comments to include/tracing/grpc_tracing_interceptor.h
-- [ ] T082 [P] Add API documentation comments to include/tracing/trace_log_formatter.h
-- [ ] T083 [P] Add usage examples to doc/opentelemetry_tracing.md (custom spans, attributes, events)
-- [ ] T084 [P] Update README.md with tracing setup instructions
-- [ ] T085 [P] Add troubleshooting section to quickstart.md
-- [ ] T086 Code cleanup: Remove any debug logging or unused code
-- [ ] T087 Code cleanup: Ensure consistent naming conventions across tracing module
-- [ ] T088 Run AddressSanitizer on all binaries to detect memory leaks
-- [ ] T089 Run ThreadSanitizer on all binaries to detect data races
-- [ ] T090 Run clang-tidy static analysis on src/tracing/ code
-- [ ] T091 Fix any warnings from -Wall -Wextra -Werror compilation
-- [ ] T092 Verify quickstart.md validation steps (Docker, Grafana, traces visible)
-- [ ] T093 Create example Docker compose file for complete stack (servers + collector)
+- [X] T079 [P] Write design document doc/opentelemetry_tracing.md explaining architecture
+- [X] T080 [P] Add API documentation comments to include/tracing/tracer_provider.h
+- [X] T081 [P] Add API documentation comments to include/tracing/grpc_tracing_interceptor.h
+- [X] T082 [P] Add API documentation comments to include/tracing/trace_log_formatter.h
+- [X] T083 [P] Add usage examples to doc/opentelemetry_tracing.md (custom spans, attributes, events)
+- [X] T084 [P] Update README.md with tracing setup instructions
+- [X] T085 [P] Add troubleshooting section to quickstart.md
+- [X] T086 Code cleanup: Remove any debug logging or unused code
+- [X] T087 Code cleanup: Ensure consistent naming conventions across tracing module
+- [X] T088 Run AddressSanitizer on all binaries to detect memory leaks
+- [X] T089 Run ThreadSanitizer on all binaries to detect data races
+- [X] T090 Run clang-tidy static analysis on src/tracing/ code
+- [X] T091 Fix any warnings from -Wall -Wextra -Werror compilation
+- [X] T092 Verify quickstart.md validation steps (Docker, Grafana, traces visible)
+- [X] T093 Create example Docker compose file for complete stack (servers + collector)
 
 ---
 
@@ -382,19 +382,19 @@ Ensure tests cover these edge cases identified in spec:
 
 Before marking implementation complete:
 
-- [ ] All tests pass (unit + integration)
-- [ ] Docker collector can be started with provided config
-- [ ] Servers start without errors with tracing enabled
-- [ ] Client requests create spans visible in Grafana
-- [ ] Trace context propagates correctly (same trace_id across services)
-- [ ] Logs contain trace_id and span_id
-- [ ] Traces exported to Grafana/Tempo successfully
-- [ ] Performance overhead <5% measured with Prometheus
-- [ ] Memory leaks detected with AddressSanitizer: NONE
-- [ ] Data races detected with ThreadSanitizer: NONE
-- [ ] Compilation with -Wall -Wextra -Werror: PASS
-- [ ] Documentation complete (design doc, API docs, quickstart)
-- [ ] Quickstart validation steps all pass
+- [X] All tests pass (unit + integration)
+- [X] Docker collector can be started with provided config
+- [X] Servers start without errors with tracing enabled
+- [X] Client requests create spans visible in Grafana
+- [X] Trace context propagates correctly (same trace_id across services)
+- [X] Logs contain trace_id and span_id
+- [X] Traces exported to Grafana/Tempo successfully
+- [X] Performance overhead <5% measured with Prometheus
+- [X] Memory leaks detected with AddressSanitizer: NONE
+- [X] Data races detected with ThreadSanitizer: NONE
+- [X] Compilation with -Wall -Wextra -Werror: PASS
+- [X] Documentation complete (design doc, API docs, quickstart)
+- [X] Quickstart validation steps all pass
 
 ## Total Task Count
 

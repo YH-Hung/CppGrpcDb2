@@ -108,7 +108,7 @@ void ServerTracingInterceptor::Intercept(grpc::experimental::InterceptorBatchMet
     methods->Proceed();
 }
 
-void ServerTracingInterceptor::StartServerSpan(grpc::experimental::InterceptorBatchMethods* methods) {
+void ServerTracingInterceptor::StartServerSpan(grpc::experimental::InterceptorBatchMethods* /* methods */) {
     try {
         auto tracer = TracerProvider::GetTracer("grpc-server");
         if (!tracer) {
