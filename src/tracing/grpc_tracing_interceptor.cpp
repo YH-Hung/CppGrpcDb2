@@ -87,10 +87,20 @@ ServerTracingInterceptor::ServerTracingInterceptor(grpc::experimental::ServerRpc
 void ServerTracingInterceptor::Intercept(grpc::experimental::InterceptorBatchMethods* methods) {
     // Handle different interception points in the RPC lifecycle
 
+    // Start the server span as early as possible, right after receiving initial metadata
+    if (methods->QueryInterceptionHookPoint(
+            grpc::experimental::InterceptionHookPoints::POST_RECV_INITIAL_METADATA)) {
+        if (!span_) {
+            StartServerSpan(methods);
+        }
+    }
+
     if (methods->QueryInterceptionHookPoint(
             grpc::experimental::InterceptionHookPoints::PRE_SEND_INITIAL_METADATA)) {
         // This is the earliest hook - extract context and start span here
-        StartServerSpan(methods);
+        if (!span_) {
+            StartServerSpan(methods);
+        }
     }
 
     if (methods->QueryInterceptionHookPoint(

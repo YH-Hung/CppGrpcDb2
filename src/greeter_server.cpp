@@ -1,4 +1,3 @@
-#include <iostream>
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
@@ -13,6 +12,8 @@
 #include "metrics_interceptor.h"
 #include "tracing/tracer_provider.h"
 #include "tracing/grpc_tracing_interceptor.h"
+#include "tracing/trace_log_formatter.h"
+#include "spdlog/spdlog.h"
 #include <vector>
 
 using grpc::Server;
@@ -72,7 +73,7 @@ void RunServer(uint16_t port) {
     }
     // Finally assemble the server.
     std::unique_ptr<Server> server(builder.BuildAndStart());
-    std::cout << "Server listening on " << server_address << std::endl;
+    spdlog::info("Server listening on {}", server_address);
 
     // Wait for the server to shutdown. Note that some other thread must be
     // responsible for shutting down the server for this call to ever return.
@@ -82,6 +83,9 @@ void RunServer(uint16_t port) {
 int main(int argc, char** argv) {
     // Initialize OpenTelemetry tracing
     tracing::TracerProvider::Initialize();
+
+    // Set up trace-aware logging so all spdlog messages carry trace/span ids
+    tracing::SetTraceLogging();
 
     // Run the gRPC server
     RunServer(50051);

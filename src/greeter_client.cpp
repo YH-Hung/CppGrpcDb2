@@ -6,6 +6,8 @@
 #include "helloworld.grpc.pb.h"
 #include "tracing/tracer_provider.h"
 #include "tracing/grpc_tracing_interceptor.h"
+#include "tracing/trace_log_formatter.h"
+#include "spdlog/spdlog.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -40,8 +42,7 @@ public:
         if (status.ok()) {
             return reply.message();
         } else {
-            std::cout << status.error_code() << ": " << status.error_message()
-                      << std::endl;
+            spdlog::error("RPC failed: {} - {}", static_cast<int>(status.error_code()), status.error_message());
             return "RPC failed";
         }
     }
@@ -54,14 +55,32 @@ int main(int argc, char** argv) {
     // Initialize OpenTelemetry tracing
     tracing::TracerProvider::Initialize();
 
+    // Set up trace-aware logging so all spdlog messages carry trace/span ids
+    tracing::SetTraceLogging();
+
     std::string target_str = "localhost:50051";
     // Create a traced channel with automatic span creation and context propagation
     GreeterClient greeter(
         tracing::CreateTracedChannel(target_str, grpc::InsecureChannelCredentials()));
-    // std::string user("賴柔瑤");
-    std::string user("黃美晴");
+    std::string user("賴柔瑤");
+    // std::string user("黃美晴");
+    // Create a parent span to keep trace context active for local logs around the RPC
+    auto tracer = tracing::TracerProvider::GetTracer("greeter-client");
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> parent_span;
+    if (tracer) {
+        parent_span = tracer->StartSpan("GreeterClientMain");
+    }
+    opentelemetry::nostd::unique_ptr<opentelemetry::trace::Scope> scope;
+    if (parent_span) {
+        scope.reset(new opentelemetry::trace::Scope(parent_span));
+    }
+
     std::string reply = greeter.SayHello(user);
-    std::cout << "Greeter received: " << reply << std::endl;
+    spdlog::info("Greeter received: {}", reply);
+
+    if (parent_span) {
+        parent_span->End();
+    }
 
     // Shutdown tracing and flush pending spans
     tracing::TracerProvider::Shutdown();

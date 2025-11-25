@@ -152,11 +152,27 @@ void RunServer(uint16_t port) {
   
   // Finally assemble the server.
   std::unique_ptr<Server> server(builder.BuildAndStart());
+  // Keep a long-lived span active for the server lifetime so logs after this point carry trace context
+  auto tracer = tracing::TracerProvider::GetTracer("greeter-callback-server");
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> server_span;
+  if (tracer) {
+    server_span = tracer->StartSpan("GreeterCallbackServer.Run");
+  }
+  opentelemetry::nostd::unique_ptr<opentelemetry::trace::Scope> server_scope;
+  if (server_span) {
+    server_scope.reset(new opentelemetry::trace::Scope(server_span));
+  }
+
   spdlog::info("Server listening on {}", server_address);
 
   // Wait for the server to shutdown. Note that some other thread must be
   // responsible for shutting down the server for this call to ever return.
   server->Wait();
+
+  // End the long-lived server span after shutdown
+  if (server_span) {
+    server_span->End();
+  }
 }
 
 int main(int argc, char** argv) {
