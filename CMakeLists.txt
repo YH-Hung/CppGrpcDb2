@@ -228,6 +228,30 @@ target_link_libraries(greeter_callback_server_no_db2
 target_compile_features(greeter_callback_server_no_db2 PRIVATE cxx_std_20)
 
 # ==============================================================================
+# Async Server
+# ==============================================================================
+
+add_executable(complex_proto_async
+        src/call_data/CallData.h
+        src/call_data/GreeterSayHelloCallData.cpp
+        src/call_data/GreeterSayHelloCallData.h
+        src/complex_async_server_single_cq.cpp
+)
+
+target_include_directories(complex_proto_async
+        PRIVATE ${PROJECT_SOURCE_DIR}/include
+        PRIVATE "${generated_dir}"
+)
+
+target_link_libraries(complex_proto_async
+        PRIVATE ${PROTO_LIBS}
+        PRIVATE ${_REFLECTION}
+        PRIVATE ${_GRPC_GRPCPP}
+        PRIVATE ${_PROTOBUF_LIBPROTOBUF}
+        PRIVATE spdlog::spdlog
+)
+
+# ==============================================================================
 # Unit Tests
 # ==============================================================================
 
