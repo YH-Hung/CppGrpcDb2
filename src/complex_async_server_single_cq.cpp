@@ -102,31 +102,13 @@ private:
     std::unique_ptr<grpc::Server> server_;
 };
 
-void signal_waiter(SingleCqServer *server) {
-    sigset_t sigset;
-    sigemptyset(&sigset);
-    sigaddset(&sigset, SIGINT);
-    sigaddset(&sigset, SIGTERM);
-
-    int sig;
-    // Wait until a signal is received
-    sigwait(&sigset, &sig);
-
-    spdlog::warn("Received termination signal, shutting down gRPC server...");
-
-    server->Shutdown();
-}
-
 int main(int argc, char** argv) {
     uint16_t port = 50051;
     if (argc > 1) {
         port = static_cast<uint16_t>(std::stoi(argv[1]));
     }
 
-    // Block termination signals in the main thread so that only the dedicated
-    // watcher thread handles them via sigwait(). This is required by POSIX and
-    // avoids undefined behavior on macOS where calling sigwait() without the
-    // signals being blocked can lead to a SIGTRAP.
+    // Block termination signals. The main thread will wait for them.
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
@@ -134,12 +116,22 @@ int main(int argc, char** argv) {
     pthread_sigmask(SIG_BLOCK, &set, nullptr);
 
     auto server = std::make_unique<SingleCqServer>();
-    std::thread watcher(signal_waiter, server.get());
 
-    server->Run(port);
+    // Run the server in a separate thread.
+    std::thread server_thread([&server, port]() {
+        server->Run(port);
+    });
 
-    // TODO: may replace by signal(SIGINT, signal_handler)?
-    watcher.join();
+    // Wait for a termination signal.
+    int sig;
+    sigwait(&set, &sig);
+
+    spdlog::warn("Received termination signal, shutting down gRPC server...");
+    server->Shutdown();
+
+    // Wait for the server thread to finish.
+    server_thread.join();
+
     spdlog::info("Server stopped.");
 
     return 0;
