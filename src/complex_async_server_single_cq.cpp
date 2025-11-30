@@ -2,6 +2,7 @@
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/health_check_service_interface.h>
 #include <memory>
+#include <vector>
 #include <signal.h>
 #include <pthread.h>
 
@@ -10,6 +11,7 @@
 #include "health.pb.h"
 #include "health.grpc.pb.h"
 #include "call_data/GreeterSayHelloCallData.h"
+#include "message_logging_interceptor.h"
 
 // Ensure health.proto descriptors are linked into the binary so that
 // server reflection can serve them and grpcurl can describe/invoke Health.
@@ -40,6 +42,12 @@ public:
         builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
 
         builder.RegisterService(greeter_service_.get());
+
+        // Register message logging interceptor
+        auto logging_factory = std::make_unique<MessageLoggingServerInterceptorFactory>();
+        std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
+        interceptors.push_back(std::move(logging_factory));
+        builder.experimental().SetInterceptorCreators(std::move(interceptors));
 
         cq_ = builder.AddCompletionQueue();
 
@@ -93,8 +101,6 @@ public:
 
         spdlog::info("Server shut down.");
     }
-
-    // TODO: Adopt Interceptor
 
 private:
     std::unique_ptr<helloworld::Greeter::AsyncService> greeter_service_;

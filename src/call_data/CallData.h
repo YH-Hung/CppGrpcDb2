@@ -2,6 +2,84 @@
 #define CPPGRPCDB2_CALLDATA_H
 #include <grpcpp/completion_queue.h>
 #include <grpcpp/server_context.h>
+#include <spdlog/spdlog.h>
+#include <google/protobuf/message.h>
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/reflection.h>
+#include <sstream>
+
+// Helper function to serialize protobuf message preserving UTF-8 characters
+template<typename MessageType>
+static std::string MessageToString(const MessageType& msg) {
+    std::ostringstream oss;
+    const google::protobuf::Descriptor* descriptor = msg.GetDescriptor();
+    const google::protobuf::Reflection* reflection = msg.GetReflection();
+    
+    for (int i = 0; i < descriptor->field_count(); ++i) {
+        const google::protobuf::FieldDescriptor* field = descriptor->field(i);
+        if (i > 0) oss << " ";
+        
+        oss << field->name() << ": ";
+        
+        if (field->type() == google::protobuf::FieldDescriptor::TYPE_STRING) {
+            if (field->is_repeated()) {
+                oss << "[";
+                int count = reflection->FieldSize(msg, field);
+                for (int j = 0; j < count; ++j) {
+                    if (j > 0) oss << ", ";
+                    oss << "\"" << reflection->GetRepeatedString(msg, field, j) << "\"";
+                }
+                oss << "]";
+            } else {
+                oss << "\"" << reflection->GetString(msg, field) << "\"";
+            }
+        } else if (field->type() == google::protobuf::FieldDescriptor::TYPE_INT32) {
+            if (field->is_repeated()) {
+                oss << "[";
+                int count = reflection->FieldSize(msg, field);
+                for (int j = 0; j < count; ++j) {
+                    if (j > 0) oss << ", ";
+                    oss << reflection->GetRepeatedInt32(msg, field, j);
+                }
+                oss << "]";
+            } else {
+                oss << reflection->GetInt32(msg, field);
+            }
+        } else if (field->type() == google::protobuf::FieldDescriptor::TYPE_INT64) {
+            if (field->is_repeated()) {
+                oss << "[";
+                int count = reflection->FieldSize(msg, field);
+                for (int j = 0; j < count; ++j) {
+                    if (j > 0) oss << ", ";
+                    oss << reflection->GetRepeatedInt64(msg, field, j);
+                }
+                oss << "]";
+            } else {
+                oss << reflection->GetInt64(msg, field);
+            }
+        } else if (field->type() == google::protobuf::FieldDescriptor::TYPE_MESSAGE) {
+            if (field->is_repeated()) {
+                oss << "[";
+                int count = reflection->FieldSize(msg, field);
+                for (int j = 0; j < count; ++j) {
+                    if (j > 0) oss << ", ";
+                    const google::protobuf::Message& sub_msg = reflection->GetRepeatedMessage(msg, field, j);
+                    oss << "{" << MessageToString(sub_msg) << "}";
+                }
+                oss << "]";
+            } else if (reflection->HasField(msg, field)) {
+                const google::protobuf::Message& sub_msg = reflection->GetMessage(msg, field);
+                oss << "{" << MessageToString(sub_msg) << "}";
+            } else {
+                oss << "<not set>";
+            }
+        } else {
+            // For other types, fall back to DebugString for that field
+            oss << "<" << field->type_name() << ">";
+        }
+    }
+    return oss.str();
+}
 
 class CallData {
 public:
@@ -34,8 +112,24 @@ public:
                     // Spawn new handler to accept next call
                     SpawnNewHandler();
 
+                    // Log request message (before processing)
+                    try {
+                        std::string request_str = MessageToString(request_);
+                        spdlog::info("[CallData] Request message: {}", request_str);
+                    } catch (const std::exception& e) {
+                        spdlog::warn("[CallData] Failed to log request message: {}", e.what());
+                    }
+
                     // Invoke business logic
                     HandleRpc();
+
+                    // Log reply message (after processing, before sending)
+                    try {
+                        std::string reply_str = MessageToString(reply_);
+                        spdlog::info("[CallData] Reply message: {}", reply_str);
+                    } catch (const std::exception& e) {
+                        spdlog::warn("[CallData] Failed to log reply message: {}", e.what());
+                    }
 
                     // Reply RPC (asynchronously). Expect one more completion for this tag.
                     status_ = CallStatus::FINISH;

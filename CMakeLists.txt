@@ -137,6 +137,24 @@ target_link_libraries(metrics_interceptor
 
 target_compile_features(metrics_interceptor PUBLIC cxx_std_20)
 
+# Message logging interceptor library
+add_library(message_logging_interceptor
+    src/message_logging_interceptor.cpp
+)
+
+target_include_directories(message_logging_interceptor
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PUBLIC "${generated_dir}"
+)
+
+target_link_libraries(message_logging_interceptor
+    PUBLIC ${_PROTOBUF_LIBPROTOBUF}
+    PUBLIC spdlog::spdlog
+    PUBLIC ${_GRPC_GRPCPP}
+)
+
+target_compile_features(message_logging_interceptor PUBLIC cxx_std_20)
+
 # ==============================================================================
 # DB2 Wrapper Library
 # ==============================================================================
@@ -249,6 +267,7 @@ target_link_libraries(complex_proto_async
         PRIVATE ${_GRPC_GRPCPP}
         PRIVATE ${_PROTOBUF_LIBPROTOBUF}
         PRIVATE spdlog::spdlog
+        PRIVATE message_logging_interceptor
 )
 
 # Ensure health_proto is linked (it should be in PROTO_LIBS if health.proto exists)
