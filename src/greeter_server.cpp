@@ -9,6 +9,8 @@
 #include <chrono>
 #include "helloworld.pb.h"
 #include "helloworld.grpc.pb.h"
+#include "health.pb.h"
+#include "health.grpc.pb.h"
 #include "absl/strings/str_format.h"
 #include "metrics_interceptor.h"
 #include <vector>
@@ -20,6 +22,13 @@ using grpc::Status;
 using helloworld::Greeter;
 using helloworld::HelloReply;
 using helloworld::HelloRequest;
+
+// Ensure health.proto descriptors are linked into the binary so that
+// server reflection can serve them and grpcurl can describe/invoke Health.
+static inline void ForceLinkHealthProtoDescriptors() {
+    (void)grpc::health::v1::HealthCheckRequest::default_instance();
+    (void)grpc::health::v1::HealthCheckResponse::default_instance();
+}
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
@@ -39,6 +48,8 @@ public:
 };
 
 void RunServer(uint16_t port) {
+    // Force-link health proto descriptors before server starts.
+    ForceLinkHealthProtoDescriptors();
     std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
     // Create Prometheus exposer on localhost:8124 and a registry
     auto exposer = std::make_unique<prometheus::Exposer>("127.0.0.1:8124");
@@ -62,9 +73,14 @@ void RunServer(uint16_t port) {
         interceptors.push_back(std::move(metrics_factory));
         builder.experimental().SetInterceptorCreators(std::move(interceptors));
     }
+
     // Finally assemble the server.
     std::unique_ptr<Server> server(builder.BuildAndStart());
     std::cout << "Server listening on " << server_address << std::endl;
+
+    // Set health check service serving (overall and per-service)
+    server->GetHealthCheckService()->SetServingStatus(true);
+    server->GetHealthCheckService()->SetServingStatus("helloworld.Greeter", true);
 
     // Wait for the server to shutdown. Note that some other thread must be
     // responsible for shutting down the server for this call to ever return.

@@ -251,6 +251,12 @@ target_link_libraries(complex_proto_async
         PRIVATE spdlog::spdlog
 )
 
+# Ensure health_proto is linked (it should be in PROTO_LIBS if health.proto exists)
+# Explicitly check and add if needed
+#if(TARGET health_proto)
+#    target_link_libraries(complex_proto_async PRIVATE health_proto)
+#endif()
+
 # ==============================================================================
 # Unit Tests
 # ==============================================================================

@@ -17,6 +17,8 @@
 #else
 #include "hello_girl.grpc.pb.h"
 #endif
+#include "health.pb.h"
+#include "health.grpc.pb.h"
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
 #include "utf8ansi.h"
@@ -29,6 +31,13 @@ using grpc::Status;
 using hellogirl::GirlGreeter;
 using hellogirl::HelloGirlReply;
 using hellogirl::HelloGirlRequest;
+
+// Ensure health.proto descriptors are linked into the binary so that
+// server reflection can serve them and grpcurl can describe/invoke Health.
+static inline void ForceLinkHealthProtoDescriptors() {
+    (void)grpc::health::v1::HealthCheckRequest::default_instance();
+    (void)grpc::health::v1::HealthCheckResponse::default_instance();
+}
 
 class SimpleGreeterServiceImpl final : public GirlGreeter::CallbackService {
  public:
@@ -83,6 +92,9 @@ void signal_waiter(grpc::Server* server) {
 }
 
 void RunServer(uint16_t port) {
+  // Force-link health proto descriptors before server starts.
+  ForceLinkHealthProtoDescriptors();
+  
   std::string server_address = "0.0.0.0:" + std::to_string(port);
 
   auto interceptor_factory = std::make_unique<StringTransformServerInterceptorFactory>();
@@ -129,6 +141,10 @@ void RunServer(uint16_t port) {
 
   std::unique_ptr<Server> server(builder.BuildAndStart());
   spdlog::info("Server listening on {}", server_address);
+
+  // Set health check service serving (overall and per-service)
+  server->GetHealthCheckService()->SetServingStatus(true);
+  server->GetHealthCheckService()->SetServingStatus("hellogirl.GirlGreeter", true);
 
   // Thread dedicated to signal waiting
   std::thread watcher(signal_waiter, server.get());

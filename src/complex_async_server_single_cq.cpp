@@ -1,11 +1,22 @@
 #include <grpcpp/grpcpp.h>
+#include <grpcpp/ext/proto_server_reflection_plugin.h>
+#include <grpcpp/health_check_service_interface.h>
 #include <memory>
 #include <signal.h>
 #include <pthread.h>
 
 #include "spdlog/spdlog.h"
 #include "helloworld.grpc.pb.h"
+#include "health.pb.h"
+#include "health.grpc.pb.h"
 #include "call_data/GreeterSayHelloCallData.h"
+
+// Ensure health.proto descriptors are linked into the binary so that
+// server reflection can serve them and grpcurl can describe/invoke Health.
+static inline void ForceLinkHealthProtoDescriptors() {
+    (void)grpc::health::v1::HealthCheckRequest::default_instance();
+    (void)grpc::health::v1::HealthCheckResponse::default_instance();
+}
 
 class SingleCqServer {
 public:
@@ -14,7 +25,16 @@ public:
     }
 
     void Run(uint16_t port) {
+        // Force-link health proto descriptors before server starts.
+        ForceLinkHealthProtoDescriptors();
+
         std::string server_address = "0.0.0.0:" + std::to_string(port);
+        
+        // Enable default health check service
+        grpc::EnableDefaultHealthCheckService(true);
+        // Enable server reflection for grpcurl
+        grpc::reflection::InitProtoReflectionServerBuilderPlugin();
+        
         grpc::ServerBuilder builder;
 
         builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -25,6 +45,15 @@ public:
 
         server_ = builder.BuildAndStart();
         spdlog::info("Server listening on {}", server_address);
+
+        // Set health check service serving (overall and per-service)
+        if (server_) {
+            auto* health_service = server_->GetHealthCheckService();
+            if (health_service) {
+                health_service->SetServingStatus(true);
+                health_service->SetServingStatus("helloworld.Greeter", true);
+            }
+        }
 
         SpwanHandlers();
         HandleRpcs();
@@ -65,7 +94,6 @@ public:
         spdlog::info("Server shut down.");
     }
 
-    // TODO: Health Check
     // TODO: Adopt Interceptor
 
 private:

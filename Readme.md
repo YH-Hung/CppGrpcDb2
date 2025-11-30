@@ -300,3 +300,13 @@ Troubleshooting
 - If you get 404 on the root path, use /metrics.
 - Ensure one of the servers that creates the exposer is running (greeter_server or greeter_callback_server).
 - If scraping from another machine, update the exposer bind address to 0.0.0.0:8124.
+
+## Health Check
+
+- The health.proto must manually add to the project and run gRPC code generation against it.
+- Must add reference to the health service or it will be removed by link-time GC.
+
+```bash
+grpcurl -plaintext localhost:50051 describe
+grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
+```
