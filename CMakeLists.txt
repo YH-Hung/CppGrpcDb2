@@ -104,7 +104,7 @@ endforeach()
 
 # String transform interceptor library
 add_library(string_transform_interceptor
-    src/string_transform_interceptor.cpp
+        src/interceptor/string_transform_interceptor.cpp
 )
 
 target_include_directories(string_transform_interceptor
@@ -122,7 +122,7 @@ target_compile_features(string_transform_interceptor PUBLIC cxx_std_20)
 
 # Metrics interceptor library
 add_library(metrics_interceptor
-    src/metrics_interceptor.cpp
+        src/interceptor/metrics_interceptor.cpp
 )
 
 target_include_directories(metrics_interceptor
@@ -139,7 +139,7 @@ target_compile_features(metrics_interceptor PUBLIC cxx_std_20)
 
 # Message logging interceptor library
 add_library(message_logging_interceptor
-    src/message_logging_interceptor.cpp
+        src/interceptor/message_logging_interceptor.cpp
 )
 
 target_include_directories(message_logging_interceptor
@@ -206,7 +206,7 @@ endforeach()
 
 # Test for string interceptor (without DB2 dependency)
 add_executable(test_string_interceptor
-    src/test_string_interceptor.cpp
+        src/interceptor/test_string_interceptor.cpp
 )
 
 target_include_directories(test_string_interceptor
@@ -225,7 +225,7 @@ target_compile_features(test_string_interceptor PRIVATE cxx_std_20)
 # Test server without DB2 dependency
 add_executable(greeter_callback_server_no_db2
     src/greeter_callback_server_no_db2.cpp
-    src/byte_logging.cpp
+        src/encode/byte_logging.cpp
 )
 
 target_include_directories(greeter_callback_server_no_db2

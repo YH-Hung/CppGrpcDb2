@@ -27,7 +27,7 @@ void MessageLoggingServerInterceptor::Intercept(grpc::experimental::InterceptorB
                 auto* req_msg = static_cast<google::protobuf::Message*>(recv_msg_ptr);
                 if (req_msg) {
                     // Use DebugString() for better UTF-8 handling (preserves Unicode characters)
-                    std::string msg_str = req_msg->DebugString();
+                    std::string msg_str = req_msg->Utf8DebugString();
                     spdlog::info("[{}] Request message: {}", method_name_, msg_str);
                 }
             } catch (const std::exception& e) {
@@ -36,7 +36,7 @@ void MessageLoggingServerInterceptor::Intercept(grpc::experimental::InterceptorB
         }
     }
 
-    // Log reply message - PRE_SEND_MESSAGE should work for both sync and async
+    // Log reply message - PRE_SEND_MESSAGE only work for sync and callback, NOT async
     if (methods->QueryInterceptionHookPoint(HP::PRE_SEND_MESSAGE)) {
         void* send_msg_ptr = const_cast<void*>(methods->GetSendMessage());
         if (send_msg_ptr) {
@@ -44,7 +44,7 @@ void MessageLoggingServerInterceptor::Intercept(grpc::experimental::InterceptorB
                 auto* resp_msg = static_cast<google::protobuf::Message*>(send_msg_ptr);
                 if (resp_msg) {
                     // Use DebugString() for better UTF-8 handling
-                    std::string msg_str = resp_msg->DebugString();
+                    std::string msg_str = resp_msg->Utf8DebugString();
                     spdlog::info("[{}] Reply message: {}", method_name_, msg_str);
                 }
             } catch (const std::exception& e) {

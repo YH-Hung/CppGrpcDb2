@@ -115,7 +115,8 @@ public:
                     // Log request message (before processing)
                     try {
                         std::string request_str = MessageToString(request_);
-                        spdlog::info("[CallData] Request message: {}", request_str);
+                        spdlog::info("[CallData] Request message (reflection): {}", request_str);
+                        spdlog::info("[CallData] Request message (DebugString): {}", request_.Utf8DebugString());
                     } catch (const std::exception& e) {
                         spdlog::warn("[CallData] Failed to log request message: {}", e.what());
                     }
@@ -127,6 +128,7 @@ public:
                     try {
                         std::string reply_str = MessageToString(reply_);
                         spdlog::info("[CallData] Reply message: {}", reply_str);
+                        spdlog::info("[CallData] Reply message: {}", reply_.Utf8DebugString());
                     } catch (const std::exception& e) {
                         spdlog::warn("[CallData] Failed to log reply message: {}", e.what());
                     }
