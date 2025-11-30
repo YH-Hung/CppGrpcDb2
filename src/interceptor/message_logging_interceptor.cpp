@@ -1,4 +1,5 @@
 #include "message_logging_interceptor.h"
+#include <grpcpp/impl/codegen/config_protobuf.h>
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cctype>
@@ -26,9 +27,18 @@ void MessageLoggingServerInterceptor::Intercept(grpc::experimental::InterceptorB
             try {
                 auto* req_msg = static_cast<google::protobuf::Message*>(recv_msg_ptr);
                 if (req_msg) {
-                    // Use DebugString() for better UTF-8 handling (preserves Unicode characters)
-                    std::string msg_str = req_msg->Utf8DebugString();
-                    spdlog::info("[{}] Request message: {}", method_name_, msg_str);
+                    grpc::protobuf::json::JsonPrintOptions options;
+                    options.preserve_proto_field_names = true;  // Use snake_case field names
+
+                    std::string json_str;
+                    auto status = grpc::protobuf::json::MessageToJsonString(*req_msg, &json_str, options);
+
+                    if (status.ok()) {
+                        spdlog::info("[{}] Request message (JSON): {}", method_name_, json_str);
+                    } else {
+                        spdlog::warn("[{}] Failed to convert request to JSON: {}",
+                                     method_name_, status.ToString());
+                    }
                 }
             } catch (const std::exception& e) {
                 spdlog::warn("[{}] Failed to log request message: {}", method_name_, e.what());
@@ -43,9 +53,18 @@ void MessageLoggingServerInterceptor::Intercept(grpc::experimental::InterceptorB
             try {
                 auto* resp_msg = static_cast<google::protobuf::Message*>(send_msg_ptr);
                 if (resp_msg) {
-                    // Use DebugString() for better UTF-8 handling
-                    std::string msg_str = resp_msg->Utf8DebugString();
-                    spdlog::info("[{}] Reply message: {}", method_name_, msg_str);
+                    grpc::protobuf::json::JsonPrintOptions options;
+                    options.preserve_proto_field_names = true;  // Use snake_case field names
+
+                    std::string json_str;
+                    auto status = grpc::protobuf::json::MessageToJsonString(*resp_msg, &json_str, options);
+
+                    if (status.ok()) {
+                        spdlog::info("[{}] Reply message (JSON): {}", method_name_, json_str);
+                    } else {
+                        spdlog::warn("[{}] Failed to convert reply to JSON: {}",
+                                     method_name_, status.ToString());
+                    }
                 }
             } catch (const std::exception& e) {
                 spdlog::warn("[{}] Failed to log reply message: {}", method_name_, e.what());
