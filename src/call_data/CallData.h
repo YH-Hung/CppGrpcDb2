@@ -149,4 +149,36 @@ private:
   CallStatus status_;
 };
 
+// Macros to reduce code duplication for SayHello CallData classes
+
+// Macro to define a SayHello CallData class
+// Note: Include guard must be defined separately before using this macro
+// Parameters: CLASS_PREFIX, SERVICE_TYPE, REQUEST_TYPE, REPLY_TYPE
+// The macro constructs the class name as: {CLASS_PREFIX}CallData
+#define DEFINE_SAY_HELLO_CALLDATA_CLASS(CLASS_PREFIX, SERVICE_TYPE, REQUEST_TYPE, REPLY_TYPE) \
+class CLASS_PREFIX##CallData : public CallDataBase<SERVICE_TYPE, REQUEST_TYPE, REPLY_TYPE> { \
+public: \
+    CLASS_PREFIX##CallData(SERVICE_TYPE *service, grpc::ServerCompletionQueue *cq) \
+        : CallDataBase(service, cq) { \
+        /* Kick off the initial request registration now that the most-derived object is fully constructed. */ \
+        CallDataBase::Proceed(true); \
+    } \
+ \
+protected: \
+    void RegisterRequest() override; \
+    void HandleRpc() override; \
+    void SpawnNewHandler() override; \
+};
+
+// Macro to implement RegisterRequest() and SpawnNewHandler() methods
+// Parameters: CLASS_PREFIX
+#define IMPLEMENT_SAY_HELLO_CALLDATA_METHODS(CLASS_PREFIX) \
+void CLASS_PREFIX##CallData::RegisterRequest() { \
+    service_->RequestSayHello(&ctx_, &request_, &responder_, cq_, cq_, this); \
+} \
+ \
+void CLASS_PREFIX##CallData::SpawnNewHandler() { \
+    new CLASS_PREFIX##CallData(service_, cq_); \
+}
+
 #endif // CPPGRPCDB2_CALLDATA_H

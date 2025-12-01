@@ -1,9 +1,7 @@
 #include "HelloGirlSayHelloCallData.h"
 #include "byte_logging.h"
 
-void HelloGirlSayHelloCallData::RegisterRequest() {
-    service_->RequestSayHello(&ctx_, &request_, &responder_, cq_, cq_, this);
-}
+IMPLEMENT_SAY_HELLO_CALLDATA_METHODS(HelloGirlSayHello)
 
 void HelloGirlSayHelloCallData::HandleRpc() {
     // Log the raw bytes of the name in hexadecimal (space-delimited)
@@ -18,9 +16,5 @@ void HelloGirlSayHelloCallData::HandleRpc() {
     std::string marriage = request_.name() + " is married with " + request_.spouse();
     reply_.set_marriage(marriage);
     reply_.set_size(request_.first_round() + 1);
-}
-
-void HelloGirlSayHelloCallData::SpawnNewHandler() {
-    new HelloGirlSayHelloCallData(service_, cq_);
 }
 
