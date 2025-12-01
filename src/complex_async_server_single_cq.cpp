@@ -8,9 +8,11 @@
 
 #include "spdlog/spdlog.h"
 #include "helloworld.grpc.pb.h"
+#include "hello_girl.grpc.pb.h"
 #include "health.pb.h"
 #include "health.grpc.pb.h"
 #include "call_data/GreeterSayHelloCallData.h"
+#include "call_data/HelloGirlSayHelloCallData.h"
 #include "message_logging_interceptor.h"
 
 // Ensure health.proto descriptors are linked into the binary so that
@@ -24,6 +26,7 @@ class SingleCqServer {
 public:
     SingleCqServer() {
         greeter_service_ = std::make_unique<helloworld::Greeter::AsyncService>();
+        girl_greeter_service_ = std::make_unique<hellogirl::GirlGreeter::AsyncService>();
     }
 
     void Run(uint16_t port) {
@@ -42,6 +45,7 @@ public:
         builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
 
         builder.RegisterService(greeter_service_.get());
+        builder.RegisterService(girl_greeter_service_.get());
 
         // Register message logging interceptor
         auto logging_factory = std::make_unique<MessageLoggingServerInterceptorFactory>();
@@ -60,6 +64,7 @@ public:
             if (health_service) {
                 health_service->SetServingStatus(true);
                 health_service->SetServingStatus("helloworld.Greeter", true);
+                health_service->SetServingStatus("hellogirl.GirlGreeter", true);
             }
         }
 
@@ -70,6 +75,7 @@ public:
     // Spawn a new CallData instance to serve new clients.
     void SpwanHandlers() {
         new GreeterSayHelloCallData(greeter_service_.get(), cq_.get());
+        new HelloGirlSayHelloCallData(girl_greeter_service_.get(), cq_.get());
     }
 
     void HandleRpcs() {
@@ -104,6 +110,7 @@ public:
 
 private:
     std::unique_ptr<helloworld::Greeter::AsyncService> greeter_service_;
+    std::unique_ptr<hellogirl::GirlGreeter::AsyncService> girl_greeter_service_;
     std::unique_ptr<grpc::ServerCompletionQueue> cq_;
     std::unique_ptr<grpc::Server> server_;
 };

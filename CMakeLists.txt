@@ -253,7 +253,10 @@ add_executable(complex_proto_async
         src/call_data/CallData.h
         src/call_data/GreeterSayHelloCallData.cpp
         src/call_data/GreeterSayHelloCallData.h
+        src/call_data/HelloGirlSayHelloCallData.cpp
+        src/call_data/HelloGirlSayHelloCallData.h
         src/complex_async_server_single_cq.cpp
+        src/encode/byte_logging.cpp
 )
 
 target_include_directories(complex_proto_async
