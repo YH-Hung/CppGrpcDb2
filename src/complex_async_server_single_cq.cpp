@@ -14,6 +14,9 @@
 #include "call_data/GreeterSayHelloCallData.h"
 #include "call_data/HelloGirlSayHelloCallData.h"
 #include "message_logging_interceptor.h"
+#include "calldata_metrics.h"
+#include <prometheus/exposer.h>
+#include <prometheus/registry.h>
 
 // Ensure health.proto descriptors are linked into the binary so that
 // server reflection can serve them and grpcurl can describe/invoke Health.
@@ -32,6 +35,16 @@ public:
     void Run(uint16_t port) {
         // Force-link health proto descriptors before server starts.
         ForceLinkHealthProtoDescriptors();
+
+        // Initialize Prometheus metrics
+        metrics_registry_ = std::make_shared<prometheus::Registry>();
+        metrics_exposer_ = std::make_unique<prometheus::Exposer>("127.0.0.1:8125");
+        metrics_exposer_->RegisterCollectable(metrics_registry_);
+
+        calldata_metrics_ = std::make_unique<CallDataMetrics>(metrics_registry_);
+        shared_metrics_ = calldata_metrics_->GetSharedMetrics();
+
+        spdlog::info("Metrics endpoint: http://127.0.0.1:8125/metrics");
 
         std::string server_address = "0.0.0.0:" + std::to_string(port);
         
@@ -74,8 +87,8 @@ public:
 
     // Spawn a new CallData instance to serve new clients.
     void SpwanHandlers() {
-        new GreeterSayHelloCallData(greeter_service_.get(), cq_.get());
-        new HelloGirlSayHelloCallData(girl_greeter_service_.get(), cq_.get());
+        new GreeterSayHelloCallData(greeter_service_.get(), cq_.get(), &shared_metrics_);
+        new HelloGirlSayHelloCallData(girl_greeter_service_.get(), cq_.get(), &shared_metrics_);
     }
 
     void HandleRpcs() {
@@ -113,6 +126,10 @@ private:
     std::unique_ptr<hellogirl::GirlGreeter::AsyncService> girl_greeter_service_;
     std::unique_ptr<grpc::ServerCompletionQueue> cq_;
     std::unique_ptr<grpc::Server> server_;
+    std::unique_ptr<prometheus::Exposer> metrics_exposer_;
+    std::shared_ptr<prometheus::Registry> metrics_registry_;
+    std::unique_ptr<CallDataMetrics> calldata_metrics_;
+    CallDataSharedMetrics shared_metrics_;
 };
 
 int main(int argc, char** argv) {

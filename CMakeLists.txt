@@ -155,6 +155,23 @@ target_link_libraries(message_logging_interceptor
 
 target_compile_features(message_logging_interceptor PUBLIC cxx_std_20)
 
+# CallData metrics library
+add_library(calldata_metrics
+        src/metrics/calldata_metrics.cpp
+)
+
+target_include_directories(calldata_metrics
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PUBLIC "${generated_dir}"
+)
+
+target_link_libraries(calldata_metrics
+    PUBLIC prometheus-cpp::pull
+    PUBLIC ${_GRPC_GRPCPP}
+)
+
+target_compile_features(calldata_metrics PUBLIC cxx_std_20)
+
 # ==============================================================================
 # DB2 Wrapper Library
 # ==============================================================================
@@ -271,6 +288,8 @@ target_link_libraries(complex_proto_async
         PRIVATE ${_PROTOBUF_LIBPROTOBUF}
         PRIVATE spdlog::spdlog
         PRIVATE message_logging_interceptor
+        PRIVATE calldata_metrics
+        PRIVATE prometheus-cpp::pull
 )
 
 # Ensure health_proto is linked (it should be in PROTO_LIBS if health.proto exists)

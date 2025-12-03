@@ -1,7 +1,7 @@
 #include "HelloGirlSayHelloCallData.h"
 #include "byte_logging.h"
 
-IMPLEMENT_SAY_HELLO_CALLDATA_METHODS(HelloGirlSayHello)
+IMPLEMENT_SAY_HELLO_CALLDATA_METHODS(HelloGirlSayHello, "/hellogirl.GirlGreeter/SayHello")
 
 void HelloGirlSayHelloCallData::HandleRpc() {
     // Log the raw bytes of the name in hexadecimal (space-delimited)
