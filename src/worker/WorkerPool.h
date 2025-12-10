@@ -19,8 +19,12 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <tuple>
 #include <utility>
 #include <vector>
+#if defined(__APPLE__) || defined(__linux__)
+#include <pthread.h>
+#endif
 
 
 namespace worker {
@@ -46,6 +50,10 @@ public:
     };
 
     // Lightweight executor view that delegates to the parent pool.
+    // NOTE: Executor is a lightweight view over its parent WorkerPool.
+    // Lifetime: it must NOT outlive the WorkerPool it was created from;
+    // keeping an Executor past pool shutdown/destruction results in a
+    // dangling pointer and undefined behavior.
     class Executor {
     public:
         explicit Executor(WorkerPool& pool) noexcept : pool_{&pool} {}
@@ -74,6 +82,7 @@ public:
     explicit WorkerPool(Options options)
         : options_{normalize(std::move(options))}
         , permits_{static_cast<std::ptrdiff_t>(options_.parallelism)}
+        , drain_on_shutdown_{options_.drain_on_shutdown}
     {
         start_threads();
     }
@@ -105,6 +114,12 @@ public:
     }
 
     // Submit callable and get a future to its result.
+    // Notes:
+    //  - Arguments are moved/copied into the task at submission time.
+    //    To pass by reference, wrap with std::ref/cref explicitly.
+    //  - If the callable returns T&, the returned future type is
+    //    std::future<T&>. Ensure that the referenced object outlives
+    //    the future's get().
     template <class F, class... Args>
     auto submit(F&& f, Args&&... args) -> std::future<std::invoke_result_t<F, Args...>> {
         using R = std::invoke_result_t<F, Args...>;
@@ -112,8 +127,28 @@ public:
             throw std::runtime_error("WorkerPool is stopping");
         }
 
-        auto bound = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
-        auto ptask = std::make_shared<std::packaged_task<R()>>(std::move(bound));
+        using Tuple = std::tuple<std::decay_t<F>, std::decay_t<Args>...>;
+        Tuple tuple{std::forward<F>(f), std::forward<Args>(args)...};
+
+        auto ptask = std::make_shared<std::packaged_task<R()>>(
+            [t = std::move(tuple)]() mutable -> R {
+                if constexpr (std::is_void_v<R>) {
+                    std::apply(
+                        [](auto& fn, auto&... as) {
+                            std::invoke(std::move(fn), std::move(as)...);
+                        },
+                        t
+                    );
+                } else {
+                    return std::apply(
+                        [](auto& fn, auto&... as) -> R {
+                            return std::invoke(std::move(fn), std::move(as)...);
+                        },
+                        t
+                    );
+                }
+            }
+        );
         std::future<R> fut = ptask->get_future();
 
         Task task = [ptask]() mutable {
@@ -140,10 +175,11 @@ public:
             drain_on_shutdown_ = drain;
             if (!drain_on_shutdown_) {
                 queue_.clear();
-                // free up any producers blocked on queue space
-                space_cv_.notify_all();
             }
         }
+
+        // Always free up any producers blocked on queue space, regardless of drain mode
+        space_cv_.notify_all();
 
         // wake workers
         task_cv_.notify_all();
@@ -210,11 +246,35 @@ private:
     void start_threads() {
         threads_.reserve(options_.thread_count);
         for (std::size_t i = 0; i < options_.thread_count; ++i) {
-            threads_.emplace_back([this](std::stop_token st){ this->worker_loop(std::move(st)); });
+            threads_.emplace_back([this, i](std::stop_token st){
+#if defined(__APPLE__) || defined(__linux__)
+                if (!this->options_.name.empty()) {
+                    std::string nm = this->options_.name + "-" + std::to_string(i);
+#  if defined(__APPLE__)
+                    constexpr std::size_t limit = 63; // macOS thread name limit
+#  else
+                    constexpr std::size_t limit = 15; // Linux pthread name limit
+#  endif
+                    if (nm.size() > limit) nm.resize(limit);
+#  if defined(__APPLE__)
+                    pthread_setname_np(nm.c_str());
+#  else
+                    pthread_setname_np(pthread_self(), nm.c_str());
+#  endif
+                }
+#endif
+                this->worker_loop(std::move(st));
+            });
         }
     }
 
     void worker_loop(std::stop_token st) noexcept {
+        // Optional stop-aware wakeups: if a stop is requested, wake any waits
+        // so the thread can make progress toward shutdown.
+        std::stop_callback on_stop{st, [this]{
+            task_cv_.notify_all();
+            space_cv_.notify_all();
+        }};
         for (;;) {
             Task task;
             {
@@ -238,7 +298,9 @@ private:
                 }
             }
 
-            // Execute outside the lock and under concurrency throttle
+            // Execute outside the lock and under concurrency throttle.
+            // Note: During shutdown with drain=true, a worker may block here
+            // on permits_.acquire() until currently running tasks complete.
             permits_.acquire();
             active_.fetch_add(1, std::memory_order_relaxed);
             try {
