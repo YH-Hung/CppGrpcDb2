@@ -325,6 +325,9 @@ foreach(test_target ${MSVC_TEST_TARGETS})
     create_test_executable(${test_target} "tests/msvc/${test_target}.cpp")
 endforeach()
 
+# WorkerPool unit tests
+create_test_executable(worker_pool_tests "tests/worker/test_worker_pool.cpp")
+
 # DB2 wrapper integration tests (opt-in, require DB2 client runtime to be present)
 option(BUILD_DB2_TESTS "Build DB2 wrapper integration tests" OFF)
 if(BUILD_DB2_TESTS)
