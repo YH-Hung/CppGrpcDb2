@@ -5,6 +5,7 @@
 #include <vector>
 #include <signal.h>
 #include <pthread.h>
+#include <atomic>
 
 #include "spdlog/spdlog.h"
 #include "helloworld.grpc.pb.h"
@@ -17,6 +18,7 @@
 #include "calldata_metrics.h"
 #include <prometheus/exposer.h>
 #include <prometheus/registry.h>
+#include <prometheus/gauge.h>
 
 // Ensure health.proto descriptors are linked into the binary so that
 // server reflection can serve them and grpcurl can describe/invoke Health.
@@ -43,6 +45,15 @@ public:
 
         calldata_metrics_ = std::make_unique<CallDataMetrics>(metrics_registry_);
         shared_metrics_ = calldata_metrics_->GetSharedMetrics();
+
+        // Gauge metric to indicate whether the single CQ worker thread is busy
+        // (i.e., currently executing CallData::Proceed()). 1 = busy, 0 = idle.
+        worker_busy_family_ = &prometheus::BuildGauge()
+                                   .Name("grpc_cq_worker_busy")
+                                   .Help("1 if the CQ worker thread is executing CallData::Proceed(), 0 if idle")
+                                   .Register(*metrics_registry_);
+        worker_busy_gauge_ = &worker_busy_family_->Add({});
+        worker_busy_gauge_->Set(0.0);
 
         spdlog::info("Metrics endpoint: http://127.0.0.1:8125/metrics");
 
@@ -100,7 +111,12 @@ public:
             // memory address of a CallData instance.
             // The return value of Next should always be checked. This return value
             // tells us whether there is any kind of event or cq_ is shutting down.
+            // Mark this worker thread as busy while executing Proceed().
+            cq_worker_busy_.store(true, std::memory_order_relaxed);
+            if (worker_busy_gauge_) worker_busy_gauge_->Set(1.0);
             static_cast<CallData*>(tag)->Proceed(ok);
+            cq_worker_busy_.store(false, std::memory_order_relaxed);
+            if (worker_busy_gauge_) worker_busy_gauge_->Set(0.0);
         }
     }
 
@@ -130,6 +146,10 @@ private:
     std::shared_ptr<prometheus::Registry> metrics_registry_;
     std::unique_ptr<CallDataMetrics> calldata_metrics_;
     CallDataSharedMetrics shared_metrics_;
+    // Busy flag indicates whether the CQ worker is currently inside CallData::Proceed()
+    std::atomic<bool> cq_worker_busy_{false};
+    prometheus::Family<prometheus::Gauge>* worker_busy_family_{nullptr};
+    prometheus::Gauge* worker_busy_gauge_{nullptr};
 };
 
 int main(int argc, char** argv) {
