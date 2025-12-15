@@ -68,7 +68,7 @@ class CallDataBase : public CallData {
 public:
   ~CallDataBase() override = default;
   CallDataBase(ServiceType *service, grpc::ServerCompletionQueue *cq,
-               CallDataSharedMetrics* metrics = nullptr)
+               CallDataMetrics* metrics = nullptr)
       : service_(service), cq_(cq), responder_(&ctx_),
         status_(CallStatus::CREATE), metrics_(metrics) {
     // IMPORTANT: Do NOT call virtual methods from constructors.
@@ -184,7 +184,7 @@ protected:
   std::string request_id_;
 
   // Metrics tracking
-  CallDataSharedMetrics* metrics_{nullptr};
+  CallDataMetrics* metrics_{nullptr};
   std::chrono::steady_clock::time_point start_time_;
   std::chrono::steady_clock::time_point processing_start_;
   std::string method_name_;
@@ -213,26 +213,16 @@ private:
     static const std::vector<double> size_buckets =
         {64, 256, 1024, 4096, 16384, 65536, 262144, 1048576};
 
-    if (metrics_->request_counter_family) {
-      request_counter_ = &metrics_->request_counter_family->Add(
-          {{"method", method_name_}, {"status", "ok"}});
-    }
-    if (metrics_->duration_histogram_family) {
-      duration_histogram_ = &metrics_->duration_histogram_family->Add(
-          method_label, duration_buckets);
-    }
-    if (metrics_->processing_histogram_family) {
-      processing_histogram_ = &metrics_->processing_histogram_family->Add(
-          method_label, duration_buckets);
-    }
-    if (metrics_->request_size_histogram_family) {
-      request_size_histogram_ = &metrics_->request_size_histogram_family->Add(
-          method_label, size_buckets);
-    }
-    if (metrics_->response_size_histogram_family) {
-      response_size_histogram_ = &metrics_->response_size_histogram_family->Add(
-          method_label, size_buckets);
-    }
+    request_counter_ = &metrics_->request_counter_family.Add(
+        {{"method", method_name_}, {"status", "ok"}});
+    duration_histogram_ = &metrics_->duration_histogram_family.Add(
+        method_label, duration_buckets);
+    processing_histogram_ = &metrics_->processing_histogram_family.Add(
+        method_label, duration_buckets);
+    request_size_histogram_ = &metrics_->request_size_histogram_family.Add(
+        method_label, size_buckets);
+    response_size_histogram_ = &metrics_->response_size_histogram_family.Add(
+        method_label, size_buckets);
   }
 
   void RecordRequestMetrics() {
@@ -260,8 +250,8 @@ private:
   }
 
   void RecordCancellation() {
-    if (metrics_ && metrics_->request_counter_family) {
-      auto& error_counter = metrics_->request_counter_family->Add({
+    if (metrics_) {
+      auto& error_counter = metrics_->request_counter_family.Add({
           {"method", method_name_.empty() ? "unknown" : method_name_},
           {"status", "cancelled"}
       });
@@ -288,7 +278,7 @@ private:
 class CLASS_PREFIX##CallData : public CallDataBase<SERVICE_TYPE, REQUEST_TYPE, REPLY_TYPE> { \
 public: \
     CLASS_PREFIX##CallData(SERVICE_TYPE *service, grpc::ServerCompletionQueue *cq, \
-                           CallDataSharedMetrics* metrics = nullptr) \
+                           CallDataMetrics* metrics = nullptr) \
         : CallDataBase(service, cq, metrics) { \
         /* Kick off the initial request registration now that the most-derived object is fully constructed. */ \
         CallDataBase::Proceed(true); \

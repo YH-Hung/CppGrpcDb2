@@ -44,7 +44,6 @@ public:
         metrics_exposer_->RegisterCollectable(metrics_registry_);
 
         calldata_metrics_ = std::make_unique<CallDataMetrics>(metrics_registry_);
-        shared_metrics_ = calldata_metrics_->GetSharedMetrics();
 
         // Gauge metric to indicate whether the single CQ worker thread is busy
         // (i.e., currently executing CallData::Proceed()). 1 = busy, 0 = idle.
@@ -98,8 +97,8 @@ public:
 
     // Spawn a new CallData instance to serve new clients.
     void SpwanHandlers() {
-        new GreeterSayHelloCallData(greeter_service_.get(), cq_.get(), &shared_metrics_);
-        new HelloGirlSayHelloCallData(girl_greeter_service_.get(), cq_.get(), &shared_metrics_);
+        new GreeterSayHelloCallData(greeter_service_.get(), cq_.get(), calldata_metrics_.get());
+        new HelloGirlSayHelloCallData(girl_greeter_service_.get(), cq_.get(), calldata_metrics_.get());
     }
 
     void HandleRpcs() {
@@ -145,7 +144,6 @@ private:
     std::unique_ptr<prometheus::Exposer> metrics_exposer_;
     std::shared_ptr<prometheus::Registry> metrics_registry_;
     std::unique_ptr<CallDataMetrics> calldata_metrics_;
-    CallDataSharedMetrics shared_metrics_;
     // Busy flag indicates whether the CQ worker is currently inside CallData::Proceed()
     std::atomic<bool> cq_worker_busy_{false};
     prometheus::Family<prometheus::Gauge>* worker_busy_family_{nullptr};
