@@ -178,6 +178,8 @@ target_compile_features(calldata_metrics PUBLIC cxx_std_20)
 
 add_library(db2_wrapper
     src/db2/db2.cpp
+        src/util/sql_util.cpp
+        src/util/sql_util.h
 )
 
 target_include_directories(db2_wrapper
@@ -327,6 +329,13 @@ endforeach()
 
 # WorkerPool unit tests
 create_test_executable(worker_pool_tests "tests/worker/test_worker_pool.cpp")
+
+# SqlUtil unit tests
+add_executable(test_sql_util tests/util/test_sql_util.cpp src/util/sql_util.cpp)
+target_include_directories(test_sql_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_sql_util PRIVATE GTest::gtest GTest::gtest_main)
+add_test(NAME test_sql_util COMMAND test_sql_util)
+target_compile_features(test_sql_util PRIVATE cxx_std_20)
 
 # DB2 wrapper integration tests (opt-in, require DB2 client runtime to be present)
 option(BUILD_DB2_TESTS "Build DB2 wrapper integration tests" OFF)
