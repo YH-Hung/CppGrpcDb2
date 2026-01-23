@@ -337,6 +337,13 @@ target_link_libraries(test_sql_util PRIVATE GTest::gtest GTest::gtest_main)
 add_test(NAME test_sql_util COMMAND test_sql_util)
 target_compile_features(test_sql_util PRIVATE cxx_std_20)
 
+# StringUtil unit tests
+add_executable(test_string_util tests/util/test_string_util.cpp src/util/string_util.cpp)
+target_include_directories(test_string_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_string_util PRIVATE GTest::gtest GTest::gtest_main)
+add_test(NAME test_string_util COMMAND test_string_util)
+target_compile_features(test_string_util PRIVATE cxx_std_20)
+
 # DB2 wrapper integration tests (opt-in, require DB2 client runtime to be present)
 option(BUILD_DB2_TESTS "Build DB2 wrapper integration tests" OFF)
 if(BUILD_DB2_TESTS)
