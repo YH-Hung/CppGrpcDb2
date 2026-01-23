@@ -80,3 +80,38 @@ TEST(StringUtilTest, RejectDashedUuidWithInvalidDashPositions) {
 TEST(StringUtilTest, RejectDashedUuidWithNonHexCharacters) {
     EXPECT_THROW(util::SanitizeUuid("123e4567-e89b-12d3-a456-42661417400g"), std::invalid_argument);
 }
+
+TEST(StringUtilTest, CopyStringToBufferExactFit) {
+    const std::string input = "hello";
+    char buffer[6] = {};
+    EXPECT_EQ(util::CopyStringToBuffer(buffer, input, sizeof(buffer)), 5u);
+    EXPECT_STREQ(buffer, "hello");
+}
+
+TEST(StringUtilTest, CopyStringToBufferTruncates) {
+    const std::string input = "abcdef";
+    char buffer[5] = {};
+    EXPECT_EQ(util::CopyStringToBuffer(buffer, input, sizeof(buffer)), 4u);
+    EXPECT_STREQ(buffer, "abcd");
+}
+
+TEST(StringUtilTest, CopyStringToBufferHandlesEmpty) {
+    const std::string input;
+    char buffer[3] = {'x', 'y', 'z'};
+    EXPECT_EQ(util::CopyStringToBuffer(buffer, input, sizeof(buffer)), 0u);
+    EXPECT_STREQ(buffer, "");
+}
+
+TEST(StringUtilTest, CopyStringToBufferChineseUtf8) {
+    const std::string input = "你好世界";
+    char buffer[10] = {};
+    EXPECT_EQ(util::CopyStringToBuffer(buffer, input, sizeof(buffer)), 9u);
+    EXPECT_STREQ(buffer, "你好世");
+}
+
+TEST(StringUtilTest, CopyStringToBufferZeroSize) {
+    const std::string input = "data";
+    char buffer[4] = {'a', 'b', 'c', 'd'};
+    EXPECT_EQ(util::CopyStringToBuffer(buffer, input, 0), 0u);
+    EXPECT_EQ(buffer[0], 'a');
+}

@@ -1,6 +1,8 @@
 #include "string_util.h"
 
+#include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <stdexcept>
 
 namespace util {
@@ -42,6 +44,19 @@ std::string SanitizeUuid(const std::string& uuid_input) {
     }
 
     return result;
+}
+
+size_t CopyStringToBuffer(char* output, const std::string& input, size_t output_size) {
+    if (output == nullptr || output_size == 0) {
+        return 0;
+    }
+
+    const size_t copy_len = std::min(input.size(), output_size - 1);
+    if (copy_len > 0) {
+        std::memcpy(output, input.data(), copy_len);
+    }
+    output[copy_len] = '\0';
+    return copy_len;
 }
 
 }  // namespace util
