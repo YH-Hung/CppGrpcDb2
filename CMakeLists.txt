@@ -114,7 +114,7 @@ target_include_directories(string_transform_interceptor
 
 target_link_libraries(string_transform_interceptor
     PUBLIC ${_PROTOBUF_LIBPROTOBUF}
-    PUBLIC spdlog::spdlog
+    PUBLIC ${SPDLOG_TARGET}
     PUBLIC utf8ansi::utf8ansi
 )
 
@@ -149,7 +149,7 @@ target_include_directories(message_logging_interceptor
 
 target_link_libraries(message_logging_interceptor
     PUBLIC ${_PROTOBUF_LIBPROTOBUF}
-    PUBLIC spdlog::spdlog
+    PUBLIC ${SPDLOG_TARGET}
     PUBLIC ${_GRPC_GRPCPP}
 )
 
@@ -257,7 +257,7 @@ target_link_libraries(greeter_callback_server_no_db2
     PRIVATE ${_REFLECTION}
     PRIVATE ${_GRPC_GRPCPP}
     PRIVATE ${_PROTOBUF_LIBPROTOBUF}
-    PRIVATE spdlog::spdlog
+    PRIVATE ${SPDLOG_TARGET}
     PRIVATE string_transform_interceptor
     PRIVATE utf8ansi::utf8ansi
 )
@@ -288,7 +288,7 @@ target_link_libraries(complex_proto_async
         PRIVATE ${_REFLECTION}
         PRIVATE ${_GRPC_GRPCPP}
         PRIVATE ${_PROTOBUF_LIBPROTOBUF}
-        PRIVATE spdlog::spdlog
+        PRIVATE ${SPDLOG_TARGET}
         PRIVATE message_logging_interceptor
         PRIVATE calldata_metrics
         PRIVATE prometheus-cpp::pull

@@ -14,7 +14,7 @@ function(create_grpc_executable target_name source_file)
         PRIVATE ${_REFLECTION}
         PRIVATE ${_GRPC_GRPCPP}
         PRIVATE ${_PROTOBUF_LIBPROTOBUF}
-        PRIVATE spdlog::spdlog
+        PRIVATE ${SPDLOG_TARGET}
         PRIVATE prometheus-cpp::pull
     )
 
