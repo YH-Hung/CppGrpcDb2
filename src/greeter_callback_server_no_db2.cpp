@@ -48,6 +48,14 @@ class SimpleGreeterServiceImpl final : public GirlGreeter::CallbackService {
                                HelloGirlReply* reply) override {
     spdlog::info("Received request for name: {}", request->name());
 
+    const auto& metadata = context->client_metadata();
+    auto it = metadata.find("special_msg");
+    if (it != metadata.end()) {
+      spdlog::info("special_msg metadata: {}", std::string(it->second.data(), it->second.size()));
+    } else {
+      spdlog::info("special_msg metadata not found in request");
+    }
+
     ServerUnaryReactor* reactor = context->DefaultReactor();
     // Check cancellation before doing any reply work
     if (context->IsCancelled()) {

@@ -31,6 +31,7 @@ public:
         // Context for the client. It could be used to convey extra information to
         // the server and/or tweak certain RPC behaviors.
         ClientContext context;
+        context.AddMetadata("special_msg", "greetings-from-girl-client");
 
         // The actual RPC.
         Status status = stub_->SayHello(&context, request, &reply);
