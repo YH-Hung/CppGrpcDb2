@@ -19,6 +19,9 @@ include(cmake/grpc.cmake)
 # Resolve spdlog library
 include(cmake/spdlog.cmake)
 
+# Resolve jsoncpp library
+include(cmake/jsoncpp.cmake)
+
 # Resolve prometheus library
 include(cmake/prometheus.cmake)
 
