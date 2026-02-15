@@ -222,6 +222,10 @@ foreach(target_name ${GRPC_TARGETS})
     endif()
 endforeach()
 
+target_link_libraries(greeter_client
+    PRIVATE ${JSONCPP_TARGET}
+)
+
 # ==============================================================================
 # Test and Utility Executables
 # ==============================================================================
