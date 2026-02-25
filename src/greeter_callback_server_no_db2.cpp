@@ -77,6 +77,11 @@ class SimpleGreeterServiceImpl final : public GirlGreeter::CallbackService {
     reply->set_marriage(marriage);
     reply->set_size(request->first_round() + 1);
 
+    // Handle bytes field
+    std::string big5_append = utf8ansi::utf8_to_big5("大好");
+    std::string secret_reply = request->secret_note() + "is " + big5_append;
+    reply->set_reply_secret(secret_reply);
+
     reactor->Finish(Status::OK);
     return reactor;
   }
@@ -165,6 +170,7 @@ void RunServer(uint16_t port) {
 }
 
 int main(int argc, char** argv) {
+  spdlog::set_level(spdlog::level::debug);
   uint16_t port = 50051;
   if (argc > 1) {
     port = static_cast<uint16_t>(std::stoi(argv[1]));

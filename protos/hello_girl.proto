@@ -24,6 +24,7 @@ message HelloGirlRequest {
   string name = 1;
   string spouse = 2;      // additional field
   int32 first_round = 3;   // additional field
+  bytes secret_note = 4;
 }
 
 // The response message containing the greetings, marriage info, and size.
@@ -31,4 +32,5 @@ message HelloGirlReply {
   string message = 1;
   string marriage = 2;    // additional field
   int32 size = 3;         // additional field
+  bytes reply_secret = 4;
 }

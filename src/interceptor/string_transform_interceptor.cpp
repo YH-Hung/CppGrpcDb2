@@ -43,7 +43,8 @@ void StringTransformServerInterceptor::TransformMessageStrings(google::protobuf:
     
     for (int i = 0; i < descriptor->field_count(); ++i) {
         const google::protobuf::FieldDescriptor* field = descriptor->field(i);
-        
+
+        // TYPE_STRING did NOT affect TYPE_BYTES fields
         if (field->type() == google::protobuf::FieldDescriptor::TYPE_STRING) {
             if (field->is_repeated()) {
                 int count = reflection->FieldSize(*message, field);
@@ -61,6 +62,8 @@ void StringTransformServerInterceptor::TransformMessageStrings(google::protobuf:
                 spdlog::debug("Transformed string field '{}': '{}' -> '{}'", 
                             field->name(), original_value, transformed_value);
             }
+        } else if (field->type() == google::protobuf::FieldDescriptor::TYPE_BYTES) {
+            spdlog::debug("Ignoring and keeping bytes field '{}' not touched", field->name());
         } else if (field->type() == google::protobuf::FieldDescriptor::TYPE_MESSAGE) {
             if (field->is_repeated()) {
                 int count = reflection->FieldSize(*message, field);

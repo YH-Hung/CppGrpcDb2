@@ -226,6 +226,10 @@ target_link_libraries(greeter_client
     PRIVATE ${JSONCPP_TARGET}
 )
 
+target_link_libraries(greeter_girl_client
+        PRIVATE utf8ansi::utf8ansi
+)
+
 # ==============================================================================
 # Test and Utility Executables
 # ==============================================================================
@@ -299,6 +303,7 @@ target_link_libraries(complex_proto_async
         PRIVATE message_logging_interceptor
         PRIVATE calldata_metrics
         PRIVATE prometheus-cpp::pull
+        PRIVATE utf8ansi::utf8ansi
 )
 
 # Ensure health_proto is linked (it should be in PROTO_LIBS if health.proto exists)
