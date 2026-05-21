@@ -1,10 +1,12 @@
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/health_check_service_interface.h>
+#include <chrono>
 #include <memory>
-#include <vector>
-#include <signal.h>
 #include <pthread.h>
+#include <signal.h>
+#include <thread>
+#include <vector>
 
 #include "spdlog/spdlog.h"
 #include "helloworld.grpc.pb.h"
@@ -15,9 +17,9 @@
 #include "call_data/HelloGirlSayHelloCallData.h"
 #include "message_logging_interceptor.h"
 #include "calldata_metrics.h"
+#include "cq_worker_metrics.h"
 #include <prometheus/exposer.h>
 #include <prometheus/registry.h>
-#include <prometheus/gauge.h>
 
 // Ensure health.proto descriptors are linked into the binary so that
 // server reflection can serve them and grpcurl can describe/invoke Health.
@@ -25,6 +27,39 @@ static inline void ForceLinkHealthProtoDescriptors() {
     (void)grpc::health::v1::HealthCheckRequest::default_instance();
     (void)grpc::health::v1::HealthCheckResponse::default_instance();
 }
+
+class CqWorkerBusyGuard {
+public:
+    explicit CqWorkerBusyGuard(CqWorkerMetrics* metrics)
+        : metrics_(metrics), start_(std::chrono::steady_clock::now()) {
+        if (metrics_) {
+            metrics_->SetBusy(true);
+        }
+    }
+
+    ~CqWorkerBusyGuard() {
+        ResetBusy();
+    }
+
+    double Finish() {
+        const auto end = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed = end - start_;
+        ResetBusy();
+        return elapsed.count();
+    }
+
+private:
+    void ResetBusy() {
+        if (active_ && metrics_) {
+            metrics_->SetBusy(false);
+        }
+        active_ = false;
+    }
+
+    CqWorkerMetrics* metrics_{nullptr};
+    std::chrono::steady_clock::time_point start_;
+    bool active_{true};
+};
 
 class SingleCqServer {
 public:
@@ -43,15 +78,7 @@ public:
         metrics_exposer_->RegisterCollectable(metrics_registry_);
 
         calldata_metrics_ = std::make_unique<CallDataMetrics>(metrics_registry_);
-
-        // Gauge metric to indicate whether the single CQ worker thread is busy
-        // (i.e., currently executing CallData::Proceed()). 1 = busy, 0 = idle.
-        worker_busy_family_ = &prometheus::BuildGauge()
-                                   .Name("grpc_cq_worker_busy")
-                                   .Help("1 if the CQ worker thread is executing CallData::Proceed(), 0 if idle")
-                                   .Register(*metrics_registry_);
-        worker_busy_gauge_ = &worker_busy_family_->Add({});
-        worker_busy_gauge_->Set(0.0);
+        cq_worker_metrics_ = std::make_unique<CqWorkerMetrics>(metrics_registry_);
 
         spdlog::info("Metrics endpoint: http://127.0.0.1:8125/metrics");
 
@@ -109,10 +136,13 @@ public:
             // memory address of a CallData instance.
             // The return value of Next should always be checked. This return value
             // tells us whether there is any kind of event or cq_ is shutting down.
-            // Mark this worker thread as busy while executing Proceed().
-            if (worker_busy_gauge_) worker_busy_gauge_->Set(1.0);
+            auto* worker_metrics = cq_worker_metrics_.get();
+            CqWorkerBusyGuard busy_guard(worker_metrics);
             static_cast<CallData*>(tag)->Proceed(ok);
-            if (worker_busy_gauge_) worker_busy_gauge_->Set(0.0);
+            const double elapsed_seconds = busy_guard.Finish();
+            if (worker_metrics) {
+                worker_metrics->ObserveDispatch(elapsed_seconds, ok);
+            }
         }
     }
 
@@ -141,8 +171,7 @@ private:
     std::unique_ptr<prometheus::Exposer> metrics_exposer_;
     std::shared_ptr<prometheus::Registry> metrics_registry_;
     std::unique_ptr<CallDataMetrics> calldata_metrics_;
-    prometheus::Family<prometheus::Gauge>* worker_busy_family_{nullptr};
-    prometheus::Gauge* worker_busy_gauge_{nullptr};
+    std::unique_ptr<CqWorkerMetrics> cq_worker_metrics_;
 };
 
 int main(int argc, char** argv) {

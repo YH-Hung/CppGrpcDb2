@@ -238,27 +238,53 @@ make test
 Instead of build and run in terminal, clion test run will make your life much easier.
 ## Prometheus metrics
 
-This project exposes basic Prometheus metrics for the gRPC servers via a server interceptor and a Prometheus HTTP exposer.
+This project exposes Prometheus metrics for the gRPC servers via server interceptors, async call-data instrumentation, and Prometheus HTTP exposers.
 
 - Which binaries expose metrics:
   - greeter_server
   - greeter_callback_server
+  - complex_proto_async
   - Note: greeter_callback_server_no_db2 does not expose metrics.
 
 - Default metrics endpoint URLs (served by the Prometheus exposer):
-  - http://127.0.0.1:8124/metrics
-  - http://localhost:8124/metrics
+  - greeter_server and greeter_callback_server: http://127.0.0.1:8124/metrics
+  - complex_proto_async: http://127.0.0.1:8125/metrics
   - The root path (e.g., http://localhost:8124) returns 404 by design; use /metrics.
 
 - Binding address:
-  - By default, the exposer binds to 127.0.0.1:8124, which is only reachable from the local machine.
-  - To allow scraping from another host, change the exposer bind address to 0.0.0.0:8124 in:
+  - By default, the exposers bind to 127.0.0.1, which is only reachable from the local machine.
+  - To allow scraping from another host, change the exposer bind address to 0.0.0.0 in:
     - src/greeter_server.cpp
     - src/greeter_callback_server.cpp
+    - src/complex_async_server_single_cq.cpp
 
-- Metrics exported by the interceptor (no labels):
+- Request metrics:
   - grpc_requests_total (counter): Total number of gRPC requests observed by the server.
   - grpc_request_duration_seconds (histogram): Request duration in seconds. Default buckets: 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0.
+  - grpc_request_duration_seconds_summary (summary): Request duration quantiles for async call-data handlers.
+  - grpc_processing_duration_seconds (histogram): Business logic processing duration for async call-data handlers.
+
+- Single completion-queue worker metrics exposed by complex_proto_async:
+  - grpc_cq_worker_busy (gauge): Instantaneous state, 1 while the single CQ worker is inside CallData::Proceed(ok), otherwise 0. This is useful for debugging current state, but scrape intervals can miss short busy periods, so it should not be used as the main utilization trend metric.
+  - grpc_cq_worker_busy_seconds_total (counter): Cumulative seconds spent dispatching completion-queue tags. This is the canonical source for utilization and trend dashboards.
+  - grpc_cq_worker_events_total{ok="true|false"} (counter): Completion-queue events dispatched, split by the gRPC `ok` flag.
+  - grpc_cq_worker_dispatch_duration_seconds{ok="true|false"} (histogram): Per-event CallData::Proceed(ok) wall-clock duration with `_bucket`, `_sum`, and `_count` samples.
+
+PromQL examples for complex_proto_async:
+
+```promql
+# Worker utilization over 5 minutes
+clamp_max(rate(grpc_cq_worker_busy_seconds_total[5m]), 1)
+
+# Idle fraction over 5 minutes
+1 - clamp_max(rate(grpc_cq_worker_busy_seconds_total[5m]), 1)
+
+# Average dispatch duration
+rate(grpc_cq_worker_dispatch_duration_seconds_sum[5m]) / rate(grpc_cq_worker_dispatch_duration_seconds_count[5m])
+
+# CQ event rate
+sum by (ok) (rate(grpc_cq_worker_events_total[5m]))
+```
 
 Quick start
 
@@ -271,6 +297,15 @@ cmake --build cmake-build-debug --target greeter_server && \
 
 # Fetch metrics
 curl -s http://127.0.0.1:8124/metrics | head
+```
+
+For complex_proto_async:
+
+```bash
+cmake --build cmake-build-debug --target complex_proto_async && \
+  ./cmake-build-debug/complex_proto_async 50051 &
+
+curl -s http://127.0.0.1:8125/metrics | rg 'grpc_cq_worker_(busy|busy_seconds_total|events_total|dispatch_duration_seconds)'
 ```
 
 2) Example output (abbreviated):
@@ -293,13 +328,16 @@ scrape_configs:
   - job_name: 'cpp-grpc-db2'
     static_configs:
       - targets: ['127.0.0.1:8124']
+  - job_name: 'cpp-grpc-db2-async'
+    static_configs:
+      - targets: ['127.0.0.1:8125']
 ```
 
 Troubleshooting
 
 - If you get 404 on the root path, use /metrics.
-- Ensure one of the servers that creates the exposer is running (greeter_server or greeter_callback_server).
-- If scraping from another machine, update the exposer bind address to 0.0.0.0:8124.
+- Ensure one of the servers that creates the exposer is running (greeter_server, greeter_callback_server, or complex_proto_async).
+- If scraping from another machine, update the exposer bind address to 0.0.0.0 for the relevant server.
 
 ## Health Check
 
