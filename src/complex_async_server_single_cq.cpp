@@ -5,7 +5,6 @@
 #include <vector>
 #include <signal.h>
 #include <pthread.h>
-#include <atomic>
 
 #include "spdlog/spdlog.h"
 #include "helloworld.grpc.pb.h"
@@ -111,10 +110,8 @@ public:
             // The return value of Next should always be checked. This return value
             // tells us whether there is any kind of event or cq_ is shutting down.
             // Mark this worker thread as busy while executing Proceed().
-            cq_worker_busy_.store(true, std::memory_order_relaxed);
             if (worker_busy_gauge_) worker_busy_gauge_->Set(1.0);
             static_cast<CallData*>(tag)->Proceed(ok);
-            cq_worker_busy_.store(false, std::memory_order_relaxed);
             if (worker_busy_gauge_) worker_busy_gauge_->Set(0.0);
         }
     }
@@ -144,8 +141,6 @@ private:
     std::unique_ptr<prometheus::Exposer> metrics_exposer_;
     std::shared_ptr<prometheus::Registry> metrics_registry_;
     std::unique_ptr<CallDataMetrics> calldata_metrics_;
-    // Busy flag indicates whether the CQ worker is currently inside CallData::Proceed()
-    std::atomic<bool> cq_worker_busy_{false};
     prometheus::Family<prometheus::Gauge>* worker_busy_family_{nullptr};
     prometheus::Gauge* worker_busy_gauge_{nullptr};
 };
