@@ -464,14 +464,15 @@ http_requests_total{method="GET",path="/api"} 5
 http_requests_total{method="POST",path="/api"} 2
 ```
 
-### Using Gauge and Histogram alongside Counter
+### Using Gauge, Histogram, and Summary alongside Counter
 
-The API pattern is identical across metric types:
+The builder API is consistent across metric types; Histogram and Summary add their bucket or quantile settings when creating a labelled metric:
 
 ```cpp
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
+#include <prometheus/summary.h>
 #include <prometheus/exposer.h>
 #include <prometheus/registry.h>
 
@@ -498,6 +499,15 @@ auto& lat = lat_family.Add(
     prometheus::Histogram::BucketBoundaries{0.01, 0.05, 0.1, 0.5, 1.0, 5.0}
 );
 lat.Observe(0.042);
+
+// Summary — observations aggregated into streaming quantiles
+auto& size_family = prometheus::BuildSummary()
+    .Name("response_size_bytes").Help("Response size summary").Register(*registry);
+auto& size = size_family.Add(
+    {{"endpoint", "/health"}},
+    prometheus::Summary::Quantiles{{0.5, 0.05}, {0.9, 0.01}, {0.99, 0.001}}
+);
+size.Observe(512.0);
 ```
 
 ---
