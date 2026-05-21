@@ -1,20 +1,23 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
+Canonical guidance for coding agents working in this repository.
 
 ## Project Overview
 
-CppGrpcDb2 is a C++20 CMake project built around gRPC/protobuf services, DB2 CLI integration, interceptors, Prometheus metrics, and focused unit tests.
+CppGrpcDb2 is a C++20 CMake project built around gRPC/protobuf services, DB2 CLI integration, interceptors, async CallData handlers, Prometheus metrics, and focused GTest coverage.
 
 Important paths:
 
 - `CMakeLists.txt`: top-level build, generated protobuf targets, executable targets, and tests.
 - `cmake/`: dependency resolution and helper functions.
 - `protos/`: source `.proto` files. Generated `.pb.*` and `.grpc.pb.*` files belong in the CMake build tree, not source control.
-- `src/`: application, library, interceptor, worker, utility, and DB2 implementation code.
+- `src/`: application, library, interceptor, metrics, worker, utility, and DB2 implementation code.
+- `src/call_data/`: async server CallData hierarchy used by `complex_proto_async`.
+- `src/metrics/`: Prometheus helper implementations such as CallData and CQ worker metrics.
 - `include/`: public headers for shared components.
 - `tests/`: GTest-based unit and integration tests.
 - `doc/`: design and reference notes.
+- `CLAUDE.md`: supplemental Claude Code notes. Keep `AGENTS.md` as the canonical agent guide.
 
 ## Build Commands
 
@@ -23,6 +26,12 @@ Use an out-of-source build directory.
 ```bash
 cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$HOME/.local -DCMAKE_PREFIX_PATH=$HOME/.local
 cmake --build build
+```
+
+Build a focused target when iterating:
+
+```bash
+cmake --build build --target complex_proto_async cq_worker_metrics_tests
 ```
 
 If the DB2 CLI driver is not in `third_party/clidriver`, configure with:
@@ -38,7 +47,14 @@ The DB2 CMake module expects the actual driver under `${DB2_CLI_INSTALL_PREFIX}/
 Run the default unit tests with:
 
 ```bash
+cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+Run focused tests with:
+
+```bash
+ctest --test-dir build --output-on-failure -R cq_worker_metrics_tests
 ```
 
 DB2 wrapper tests are opt-in and require a DB2 CLI runtime plus `DB2_CONN_STR`:
@@ -62,7 +78,7 @@ The project expects these dependencies to be available to CMake:
 - utf8ansi
 - GTest for tests
 
-See `Readme.md` for platform-specific installation notes.
+See `Readme.md` for platform-specific installation notes, metrics endpoints, and PromQL examples.
 
 ## Coding Conventions
 
@@ -71,17 +87,30 @@ See `Readme.md` for platform-specific installation notes.
 - Keep generated protobuf output in the build directory via the existing CMake generation flow.
 - Add public/shared headers under `include/` only when they are meant to be consumed across targets.
 - Keep implementation-local headers near their implementation under `src/` when they are not public API.
+- Keep Prometheus helpers in `include/*_metrics.h` plus `src/metrics/*.cpp` when the instrumentation is shared across targets.
+- Keep the existing `calldata_metrics` CMake library name unless a broader metrics-target rename is intentionally part of the change.
 - Avoid broad refactors when making targeted fixes.
 - Use existing namespace and directory patterns for `db2`, `worker`, `resource`, `interceptor`, `metrics`, and `util` code.
 
+## Metrics Notes
+
+- `greeter_server` and `greeter_callback_server` expose Prometheus metrics on `127.0.0.1:8124/metrics`.
+- `complex_proto_async` exposes Prometheus metrics on `127.0.0.1:8125/metrics`.
+- `metrics_interceptor` covers sync/callback server request metrics.
+- `CallDataMetrics` and `CqWorkerMetrics` cover the async CallData path in `complex_proto_async`.
+- Treat `grpc_cq_worker_busy` as an instantaneous diagnostic gauge only. Use `grpc_cq_worker_busy_seconds_total` with `rate()` for scrape-stable CQ worker utilization trends.
+- Keep CQ worker metric labels bounded. The current worker metrics use only `ok="true|false"`.
+
 ## Testing Guidance
 
-- Add or update focused GTest coverage when changing shared utilities, worker/resource behavior, SQL helpers, DB2 wrapper behavior, or interceptors.
+- Add or update focused GTest coverage when changing shared utilities, worker/resource behavior, SQL helpers, DB2 wrapper behavior, interceptors, or metrics helpers.
 - Prefer narrow test targets over expanding integration scope.
+- Metrics helper tests belong under `tests/metrics/` and should inspect `prometheus::Registry::Collect()` when practical.
 - For DB2 behavior, include graceful skips or keep tests behind `BUILD_DB2_TESTS` when a live database is required.
 
 ## Agent Notes
 
 - Check `git status` before editing when possible, and do not revert unrelated user changes.
-- Do not commit generated build outputs, `cmake-build-*`, or dependency installs.
+- Do not commit generated build outputs, `cmake-build-*`, `.cache/`, `.air/`, or dependency installs.
+- `.air/` is local planning/tooling state and is ignored.
 - If build or test commands fail because local dependencies are missing, report the missing dependency and the command that failed.
