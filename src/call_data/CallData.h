@@ -144,7 +144,6 @@ protected:
                   request_id_, e.what());
     }
 
-    RecordRequestMetrics();
     processing_start_ = std::chrono::steady_clock::now();
   }
 
@@ -160,7 +159,6 @@ protected:
                   request_id_, e.what());
     }
 
-    RecordResponseMetrics();
   }
 
   void OnRpcComplete() {
@@ -192,9 +190,8 @@ protected:
   // Per-request metric instances (created with method label)
   prometheus::Counter* request_counter_{nullptr};
   prometheus::Histogram* duration_histogram_{nullptr};
+  prometheus::Summary* duration_summary_{nullptr};
   prometheus::Histogram* processing_histogram_{nullptr};
-  prometheus::Histogram* request_size_histogram_{nullptr};
-  prometheus::Histogram* response_size_histogram_{nullptr};
 
 private:
   enum class CallStatus { CREATE, PROCESS, FINISH };
@@ -210,23 +207,17 @@ private:
     // Define bucket vectors once as static
     static const std::vector<double> duration_buckets =
         {0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0};
-    static const std::vector<double> size_buckets =
-        {64, 256, 1024, 4096, 16384, 65536, 262144, 1048576};
+    static const prometheus::Summary::Quantiles duration_quantiles =
+        {{0.5, 0.05}, {0.9, 0.01}, {0.99, 0.001}};
 
     request_counter_ = &metrics_->request_counter_family.Add(
         {{"method", method_name_}, {"status", "ok"}});
     duration_histogram_ = &metrics_->duration_histogram_family.Add(
         method_label, duration_buckets);
+    duration_summary_ = &metrics_->duration_summary_family.Add(
+        method_label, duration_quantiles);
     processing_histogram_ = &metrics_->processing_histogram_family.Add(
         method_label, duration_buckets);
-    request_size_histogram_ = &metrics_->request_size_histogram_family.Add(
-        method_label, size_buckets);
-    response_size_histogram_ = &metrics_->response_size_histogram_family.Add(
-        method_label, size_buckets);
-  }
-
-  void RecordRequestMetrics() {
-    ObserveHistogram(request_size_histogram_, request_.ByteSizeLong());
   }
 
   void RecordProcessingDuration() {
@@ -237,15 +228,17 @@ private:
     }
   }
 
-  void RecordResponseMetrics() {
-    ObserveHistogram(response_size_histogram_, reply_.ByteSizeLong());
-  }
-
   void RecordTotalDuration() {
-    if (metrics_ && duration_histogram_) {
+    if (metrics_ && (duration_histogram_ || duration_summary_)) {
       auto end_time = std::chrono::steady_clock::now();
       std::chrono::duration<double> total_elapsed = end_time - start_time_;
-      duration_histogram_->Observe(total_elapsed.count());
+      const double seconds = total_elapsed.count();
+      if (duration_histogram_) {
+        duration_histogram_->Observe(seconds);
+      }
+      if (duration_summary_) {
+        duration_summary_->Observe(seconds);
+      }
     }
   }
 
@@ -259,13 +252,6 @@ private:
     }
   }
 
-  // Generic histogram observer with null safety
-  template<typename T>
-  void ObserveHistogram(prometheus::Histogram* histogram, T value) {
-    if (metrics_ && histogram) {
-      histogram->Observe(static_cast<double>(value));
-    }
-  }
 };
 
 // Macros to reduce code duplication for SayHello CallData classes

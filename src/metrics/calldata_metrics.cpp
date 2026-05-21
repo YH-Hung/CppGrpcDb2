@@ -9,15 +9,11 @@ CallDataMetrics::CallDataMetrics(const std::shared_ptr<prometheus::Registry>& re
                                     .Name("grpc_request_duration_seconds")
                                     .Help("Total gRPC request duration in seconds")
                                     .Register(*registry)),
+      duration_summary_family(prometheus::BuildSummary()
+                                  .Name("grpc_request_duration_seconds_summary")
+                                  .Help("Total gRPC request duration in seconds")
+                                  .Register(*registry)),
       processing_histogram_family(prometheus::BuildHistogram()
                                       .Name("grpc_processing_duration_seconds")
                                       .Help("Business logic processing duration in seconds")
-                                      .Register(*registry)),
-      request_size_histogram_family(prometheus::BuildHistogram()
-                                        .Name("grpc_request_size_bytes")
-                                        .Help("gRPC request size in bytes")
-                                        .Register(*registry)),
-      response_size_histogram_family(prometheus::BuildHistogram()
-                                         .Name("grpc_response_size_bytes")
-                                         .Help("gRPC response size in bytes")
-                                         .Register(*registry)) {}
+                                      .Register(*registry)) {}
