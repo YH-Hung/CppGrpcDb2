@@ -1,4 +1,5 @@
 #include "message_logging_interceptor.h"
+#include "otel_tracing.h"
 #include <grpcpp/impl/codegen/config_protobuf.h>
 #include <spdlog/spdlog.h>
 #include <algorithm>
@@ -34,14 +35,16 @@ void MessageLoggingServerInterceptor::Intercept(grpc::experimental::InterceptorB
                     auto status = grpc::protobuf::json::MessageToJsonString(*req_msg, &json_str, options);
 
                     if (status.ok()) {
-                        spdlog::info("[{}] Request message (JSON): {}", method_name_, json_str);
+                        spdlog::info("[trace_id: {}] [{}] Request message (JSON): {}",
+                                     otel::CurrentTraceIdHex(), method_name_, json_str);
                     } else {
-                        spdlog::warn("[{}] Failed to convert request to JSON: {}",
-                                     method_name_, status.ToString());
+                        spdlog::warn("[trace_id: {}] [{}] Failed to convert request to JSON: {}",
+                                     otel::CurrentTraceIdHex(), method_name_, status.ToString());
                     }
                 }
             } catch (const std::exception& e) {
-                spdlog::warn("[{}] Failed to log request message: {}", method_name_, e.what());
+                spdlog::warn("[trace_id: {}] [{}] Failed to log request message: {}",
+                             otel::CurrentTraceIdHex(), method_name_, e.what());
             }
         }
     }
@@ -60,18 +63,21 @@ void MessageLoggingServerInterceptor::Intercept(grpc::experimental::InterceptorB
                     auto status = grpc::protobuf::json::MessageToJsonString(*resp_msg, &json_str, options);
 
                     if (status.ok()) {
-                        spdlog::info("[{}] Reply message (JSON): {}", method_name_, json_str);
+                        spdlog::info("[trace_id: {}] [{}] Reply message (JSON): {}",
+                                     otel::CurrentTraceIdHex(), method_name_, json_str);
                     } else {
-                        spdlog::warn("[{}] Failed to convert reply to JSON: {}",
-                                     method_name_, status.ToString());
+                        spdlog::warn("[trace_id: {}] [{}] Failed to convert reply to JSON: {}",
+                                     otel::CurrentTraceIdHex(), method_name_, status.ToString());
                     }
                 }
             } catch (const std::exception& e) {
-                spdlog::warn("[{}] Failed to log reply message: {}", method_name_, e.what());
+                spdlog::warn("[trace_id: {}] [{}] Failed to log reply message: {}",
+                             otel::CurrentTraceIdHex(), method_name_, e.what());
             }
         } else {
             // Message might not be available yet for async servers
-            spdlog::debug("[{}] Reply message not available at PRE_SEND_MESSAGE", method_name_);
+            spdlog::debug("[trace_id: {}] [{}] Reply message not available at PRE_SEND_MESSAGE",
+                          otel::CurrentTraceIdHex(), method_name_);
         }
     }
 
@@ -88,4 +94,3 @@ grpc::experimental::Interceptor* MessageLoggingServerInterceptorFactory::CreateS
     std::string method_name = info->method();
     return new MessageLoggingServerInterceptor(method_name);
 }
-

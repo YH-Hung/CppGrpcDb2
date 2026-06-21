@@ -104,6 +104,19 @@ else()
         set(_PROTOBUF_PROTOC $<TARGET_FILE:protobuf::protoc>)
     endif()
 
+    # gRPC's exported targets can reference OpenSSL imported targets without
+    # creating them, depending on how the package was built. Homebrew's OpenSSL
+    # is keg-only, so provide the common prefixes when the caller did not.
+    if(APPLE AND NOT DEFINED OPENSSL_ROOT_DIR)
+        foreach(_openssl_root "/opt/homebrew/opt/openssl@3" "/usr/local/opt/openssl@3")
+            if(EXISTS "${_openssl_root}")
+                set(OPENSSL_ROOT_DIR "${_openssl_root}")
+                break()
+            endif()
+        endforeach()
+    endif()
+    find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
+
     # Find gRPC installation
     # Looks for gRPCConfig.cmake file installed by gRPC's cmake installation.
     find_package(gRPC CONFIG REQUIRED)

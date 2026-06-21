@@ -13,6 +13,7 @@
 #include "health.grpc.pb.h"
 #include "absl/strings/str_format.h"
 #include "metrics_interceptor.h"
+#include "otel_tracing.h"
 #include <vector>
 
 using grpc::Server;
@@ -39,10 +40,14 @@ public:
                     HelloReply* reply) override {
         // Check cancellation before preparing the reply
         if (context && context->IsCancelled()) {
+            std::cout << "[trace_id: " << otel::TraceIdForServerContext(context)
+                      << "] Request cancelled" << std::endl;
             return Status(grpc::StatusCode::CANCELLED, "Request cancelled");
         }
         std::string prefix("Hello ");
         reply->set_message(prefix + request->name());
+        std::cout << "[trace_id: " << otel::TraceIdForServerContext(context)
+                  << "] Received request for name: " << request->name() << std::endl;
         return Status::OK;
     }
 };
@@ -68,8 +73,9 @@ void RunServer(uint16_t port) {
     builder.RegisterService(&service);
     // Register metrics interceptor factory
     {
-        auto metrics_factory = std::make_unique<MetricsServerInterceptorFactory>(registry);
         std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
+        interceptors.push_back(otel::MakeTracingServerInterceptorFactory());
+        auto metrics_factory = std::make_unique<MetricsServerInterceptorFactory>(registry);
         interceptors.push_back(std::move(metrics_factory));
         builder.experimental().SetInterceptorCreators(std::move(interceptors));
     }
@@ -88,6 +94,10 @@ void RunServer(uint16_t port) {
 }
 
 int main(int argc, char** argv) {
+    otel::TracingOptions tracing_options;
+    tracing_options.service_name = "greeter_server";
+    otel::InitTracing(tracing_options);
     RunServer(50051);
+    otel::ShutdownTracing();
     return 0;
 }

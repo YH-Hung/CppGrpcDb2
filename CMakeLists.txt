@@ -13,6 +13,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Resolve DB2 CLI Driver
 include(cmake/db2.cmake)
 
+# Resolve OpenTelemetry C++ library first so its protobuf/gRPC dependency
+# family can be selected before gRPC/protobuf targets are imported.
+include(cmake/opentelemetry.cmake)
+
 # Resolve gRPC library
 include(cmake/grpc.cmake)
 
@@ -176,6 +180,25 @@ target_link_libraries(calldata_metrics
 
 target_compile_features(calldata_metrics PUBLIC cxx_std_20)
 
+# OpenTelemetry tracing library
+add_library(otel_tracing
+        src/tracing/otel_tracing.cpp
+)
+
+target_include_directories(otel_tracing
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(otel_tracing
+    PUBLIC ${_GRPC_GRPCPP}
+    PUBLIC ${SPDLOG_TARGET}
+    PUBLIC opentelemetry-cpp::api
+    PUBLIC opentelemetry-cpp::sdk
+    PUBLIC opentelemetry-cpp::otlp_grpc_exporter
+)
+
+target_compile_features(otel_tracing PUBLIC cxx_std_20)
+
 # ==============================================================================
 # DB2 Wrapper Library
 # ==============================================================================
@@ -205,6 +228,8 @@ set(GRPC_TARGETS
     greeter_callback_server
     greeter_server
     greeter_client
+    greeter_async_client
+    greeter_callback_client
     greeter_girl_client
 )
 
@@ -214,6 +239,9 @@ foreach(target_name ${GRPC_TARGETS})
 
     # Add DB2 support to all targets
     add_db2_support(${target_name})
+
+    # Add tracing support to all gRPC binaries
+    add_tracing_support(${target_name})
 
     # Add interceptor support based on target type
     if(target_name STREQUAL "greeter_callback_server")
@@ -271,6 +299,7 @@ target_link_libraries(greeter_callback_server_no_db2
     PRIVATE ${_PROTOBUF_LIBPROTOBUF}
     PRIVATE ${SPDLOG_TARGET}
     PRIVATE string_transform_interceptor
+    PRIVATE otel_tracing
     PRIVATE utf8ansi::utf8ansi
 )
 
@@ -304,6 +333,7 @@ target_link_libraries(complex_proto_async
         PRIVATE message_logging_interceptor
         PRIVATE calldata_metrics
         PRIVATE prometheus-cpp::pull
+        PRIVATE otel_tracing
         PRIVATE utf8ansi::utf8ansi
 )
 
@@ -368,6 +398,17 @@ target_link_libraries(cq_worker_metrics_tests
 )
 add_test(NAME cq_worker_metrics_tests COMMAND cq_worker_metrics_tests)
 target_compile_features(cq_worker_metrics_tests PRIVATE cxx_std_20)
+
+# OpenTelemetry tracing unit tests
+add_executable(otel_tracing_tests tests/tracing/test_otel_tracing.cpp)
+target_include_directories(otel_tracing_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(otel_tracing_tests
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE otel_tracing
+)
+add_test(NAME otel_tracing_tests COMMAND otel_tracing_tests)
+target_compile_features(otel_tracing_tests PRIVATE cxx_std_20)
 
 # DB2 wrapper integration tests (opt-in, require DB2 client runtime to be present)
 option(BUILD_DB2_TESTS "Build DB2 wrapper integration tests" OFF)

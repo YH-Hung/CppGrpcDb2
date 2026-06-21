@@ -47,6 +47,13 @@ function(add_interceptor_support target_name)
     endif()
 endfunction()
 
+# Function to add OpenTelemetry tracing support to a target
+function(add_tracing_support target_name)
+    target_link_libraries(${target_name}
+        PRIVATE otel_tracing
+    )
+endfunction()
+
 # Function to create a test executable with common configuration
 function(create_test_executable target_name source_file)
     add_executable(${target_name} ${source_file})

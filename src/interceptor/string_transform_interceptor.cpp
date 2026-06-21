@@ -1,4 +1,5 @@
 #include "string_transform_interceptor.h"
+#include "otel_tracing.h"
 #include <spdlog/spdlog.h>
 
 StringTransformServerInterceptor::StringTransformServerInterceptor(
@@ -13,7 +14,8 @@ void StringTransformServerInterceptor::Intercept(grpc::experimental::Interceptor
         if (request_transform_) {
             auto* req_msg = static_cast<google::protobuf::Message*>(methods->GetRecvMessage());
             if (req_msg) {
-                spdlog::debug("Applying request string transformation");
+                spdlog::debug("[trace_id: {}] Applying request string transformation",
+                              otel::CurrentTraceIdHex());
                 TransformMessageStrings(req_msg, request_transform_);
             }
         }
@@ -23,7 +25,8 @@ void StringTransformServerInterceptor::Intercept(grpc::experimental::Interceptor
         if (response_transform_) {
             auto* resp_msg = static_cast<google::protobuf::Message*>(const_cast<void*>(methods->GetSendMessage()));
             if (resp_msg) {
-                spdlog::debug("Applying response string transformation");
+                spdlog::debug("[trace_id: {}] Applying response string transformation",
+                              otel::CurrentTraceIdHex());
                 TransformMessageStrings(resp_msg, response_transform_);
             }
         }
@@ -52,18 +55,19 @@ void StringTransformServerInterceptor::TransformMessageStrings(google::protobuf:
                     std::string original_value = reflection->GetRepeatedString(*message, field, j);
                     std::string transformed_value = transform(original_value);
                     reflection->SetRepeatedString(message, field, j, transformed_value);
-                    spdlog::debug("Transformed repeated string field '{}' [{}]: '{}' -> '{}'", 
-                                field->name(), j, original_value, transformed_value);
+                    spdlog::debug("[trace_id: {}] Transformed repeated string field '{}' [{}]: '{}' -> '{}'",
+                                otel::CurrentTraceIdHex(), field->name(), j, original_value, transformed_value);
                 }
             } else {
                 std::string original_value = reflection->GetString(*message, field);
                 std::string transformed_value = transform(original_value);
                 reflection->SetString(message, field, transformed_value);
-                spdlog::debug("Transformed string field '{}': '{}' -> '{}'", 
-                            field->name(), original_value, transformed_value);
+                spdlog::debug("[trace_id: {}] Transformed string field '{}': '{}' -> '{}'",
+                            otel::CurrentTraceIdHex(), field->name(), original_value, transformed_value);
             }
         } else if (field->type() == google::protobuf::FieldDescriptor::TYPE_BYTES) {
-            spdlog::debug("Ignoring and keeping bytes field '{}' not touched", field->name());
+            spdlog::debug("[trace_id: {}] Ignoring and keeping bytes field '{}' not touched",
+                          otel::CurrentTraceIdHex(), field->name());
         } else if (field->type() == google::protobuf::FieldDescriptor::TYPE_MESSAGE) {
             if (field->is_repeated()) {
                 int count = reflection->FieldSize(*message, field);

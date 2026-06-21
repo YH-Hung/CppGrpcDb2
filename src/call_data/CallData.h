@@ -7,38 +7,10 @@
 #include <chrono>
 #include <prometheus/counter.h>
 #include <prometheus/histogram.h>
-#include <random>
 #include <spdlog/spdlog.h>
-#include <sstream>
 
 #include "calldata_metrics.h"
-
-// Helper function to generate a UUID v4
-static std::string GenerateUuid() {
-  std::stringstream ss;
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<> dis(0, 15);
-  std::uniform_int_distribution<> dis2(8, 11);
-
-  ss << std::hex;
-  for (int i = 0; i < 8; i++)
-    ss << dis(gen);
-  ss << "-";
-  for (int i = 0; i < 4; i++)
-    ss << dis(gen);
-  ss << "-4";
-  for (int i = 0; i < 3; i++)
-    ss << dis(gen);
-  ss << "-";
-  ss << dis2(gen);
-  for (int i = 0; i < 3; i++)
-    ss << dis(gen);
-  ss << "-";
-  for (int i = 0; i < 12; i++)
-    ss << dis(gen);
-  return ss.str();
-}
+#include "otel_tracing.h"
 
 // Helper function to serialize protobuf message to JSON format
 template <typename MessageType>
@@ -133,15 +105,15 @@ protected:
     SpawnNewHandler();
     start_time_ = std::chrono::steady_clock::now();
     InitializeMetricsForMethod();
-    request_id_ = GenerateUuid();
+    trace_id_ = otel::TraceIdForServerContext(&ctx_);
 
     try {
       std::string request_json = MessageToJsonString(request_);
-      spdlog::info("[CallData] [ReqID: {}] Request message (JSON): {}",
-                  request_id_, request_json);
+      spdlog::info("[CallData] [trace_id: {}] Request message (JSON): {}",
+                  trace_id_, request_json);
     } catch (const std::exception &e) {
-      spdlog::warn("[CallData] [ReqID: {}] Failed to log request message: {}",
-                  request_id_, e.what());
+      spdlog::warn("[CallData] [trace_id: {}] Failed to log request message: {}",
+                  trace_id_, e.what());
     }
 
     processing_start_ = std::chrono::steady_clock::now();
@@ -152,11 +124,11 @@ protected:
 
     try {
       std::string reply_json = MessageToJsonString(reply_);
-      spdlog::info("[CallData] [ReqID: {}] Reply message (JSON): {}",
-                  request_id_, reply_json);
+      spdlog::info("[CallData] [trace_id: {}] Reply message (JSON): {}",
+                  trace_id_, reply_json);
     } catch (const std::exception &e) {
-      spdlog::warn("[CallData] [ReqID: {}] Failed to log reply message: {}",
-                  request_id_, e.what());
+      spdlog::warn("[CallData] [trace_id: {}] Failed to log reply message: {}",
+                  trace_id_, e.what());
     }
 
   }
@@ -179,7 +151,7 @@ protected:
   RequestType request_;
   ReplyType reply_;
   grpc::ServerAsyncResponseWriter<ReplyType> responder_;
-  std::string request_id_;
+  std::string trace_id_;
 
   // Metrics tracking
   CallDataMetrics* metrics_{nullptr};

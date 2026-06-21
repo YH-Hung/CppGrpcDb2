@@ -4,6 +4,7 @@
 #include <iomanip>
 
 #include "spdlog/spdlog.h"
+#include "otel_tracing.h"
 
 namespace util {
 
@@ -18,7 +19,8 @@ std::string ToHexSpaceDelimited(std::string_view bytes) {
 }
 
 void LogBytesHexSpaceDelimited(std::string_view bytes, std::string_view label) {
-    spdlog::info("{}: {}", label, ToHexSpaceDelimited(bytes));
+    spdlog::info("[trace_id: {}] {}: {}", otel::CurrentTraceIdHex(), label,
+                 ToHexSpaceDelimited(bytes));
 }
 
 }  // namespace util
