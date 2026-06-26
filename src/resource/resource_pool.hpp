@@ -7,25 +7,24 @@
 // - Optional validator to health-check resources on return/acquire
 // - Safe shutdown to wake waiters and drain idle resources
 //
-// Typical usage with db2::Connection:
+// Typical usage with some expensive Resource type:
 //
-//   using db2::Connection;
-//   auto pool = resource::ResourcePool<Connection>::create(
+//   auto pool = resource::ResourcePool<Resource>::create(
 //       /*max_size=*/8,
-//       // Factory to create a new Connection
+//       // Factory to create a new Resource
 //       []() {
-//         auto c = std::make_unique<Connection>();
-//         // c->connect_with_dsn("MYDSN", "user", "pwd"); // or conn string
-//         return c;
+//         auto r = std::make_unique<Resource>();
+//         // r->open(...); // perform any expensive setup here
+//         return r;
 //       },
 //       // Optional validator (can be omitted)
-//       [](const Connection& c){ return c.is_connected(); }
+//       [](const Resource& r){ return r.is_valid(); }
 //   );
 //
-//   // Acquire a connection (blocks until available). When the shared_ptr
+//   // Acquire a resource (blocks until available). When the shared_ptr
 //   // is destroyed, the resource is returned to the pool automatically.
-//   auto conn = pool->acquire();
-//   conn->execute("CREATE TABLE ...");
+//   auto r = pool->acquire();
+//   r->do_work();
 //
 // Note: For the RAII deleter to safely return resources to the pool, the pool
 // must be owned by a std::shared_ptr (created via ResourcePool::create()).

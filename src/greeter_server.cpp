@@ -14,6 +14,8 @@
 #include "absl/strings/str_format.h"
 #include "metrics_interceptor.h"
 #include "otel_tracing.h"
+#include "greeting/greeting_store.hpp"
+#include <optional>
 #include <vector>
 
 using grpc::Server;
@@ -34,7 +36,8 @@ static inline void ForceLinkHealthProtoDescriptors() {
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
 public:
-    GreeterServiceImpl() = default;
+    explicit GreeterServiceImpl(std::optional<greeting::GreetingStore> store)
+        : store_(std::move(store)) {}
 
     Status SayHello(ServerContext* context, const HelloRequest* request,
                     HelloReply* reply) override {
@@ -44,12 +47,18 @@ public:
                       << "] Request cancelled" << std::endl;
             return Status(grpc::StatusCode::CANCELLED, "Request cancelled");
         }
-        std::string prefix("Hello ");
-        reply->set_message(prefix + request->name());
+        // Personalize the salutation from Db2 when a store is configured,
+        // otherwise fall back to the default "Hello".
+        std::string salutation =
+            store_ ? store_->GreetingFor(request->name()) : "Hello";
+        reply->set_message(salutation + " " + request->name());
         std::cout << "[trace_id: " << otel::TraceIdForServerContext(context)
                   << "] Received request for name: " << request->name() << std::endl;
         return Status::OK;
     }
+
+private:
+    std::optional<greeting::GreetingStore> store_;
 };
 
 void RunServer(uint16_t port) {
@@ -61,7 +70,10 @@ void RunServer(uint16_t port) {
     auto registry = std::make_shared<prometheus::Registry>();
     exposer->RegisterCollectable(registry);
 
-    GreeterServiceImpl service;
+    // Open the Db2-backed greeting store from DB2_CONN_STR (graceful when unset).
+    auto store = greeting::GreetingStore::OpenFromEnv();
+    if (store) store->EnsureSchema();
+    GreeterServiceImpl service(std::move(store));
 
     grpc::EnableDefaultHealthCheckService(true);
     grpc::reflection::InitProtoReflectionServerBuilderPlugin();
