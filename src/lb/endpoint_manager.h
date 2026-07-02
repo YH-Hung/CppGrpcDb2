@@ -39,6 +39,15 @@ public:
     // than failing the call outright.
     std::size_t Select();
 
+    // As above, but skips endpoints the caller has already tried this logical
+    // call (`already_tried[i] == true`). Among the remaining endpoints the same
+    // policy applies: round-robin over those not in cooldown, else the one
+    // recovering soonest. The failover loop uses this so an all-cooldown
+    // fallback lands on the untried endpoint recovering soonest instead of
+    // probing to an arbitrary, possibly worse, endpoint by index.
+    // Throws std::invalid_argument if every endpoint is marked tried.
+    std::size_t Select(const std::vector<bool>& already_tried);
+
     // Returns true if this success ended a failure streak (endpoint recovered).
     bool ReportSuccess(std::size_t index);
 

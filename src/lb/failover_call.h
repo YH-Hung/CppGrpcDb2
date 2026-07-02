@@ -47,14 +47,9 @@ grpc::Status CallWithFailover(EndpointManager& manager, const FailoverOptions& o
     grpc::Status last_status(grpc::StatusCode::UNAVAILABLE, "no endpoint attempted");
 
     for (std::size_t attempt = 0; attempt < attempt_cap; ++attempt) {
-        std::size_t index = manager.Select();
-        if (tried[index]) {
-            // Cooldowns can steer Select() back to a tried endpoint; probe forward.
-            for (std::size_t k = 0; k < endpoint_count && tried[index]; ++k) {
-                index = (index + 1) % endpoint_count;
-            }
-            if (tried[index]) break;  // every endpoint tried
-        }
+        // Select() skips endpoints already tried this call, so an all-cooldown
+        // fallback still lands on the untried endpoint recovering soonest.
+        const std::size_t index = manager.Select(tried);
         tried[index] = true;
 
         grpc::ClientContext context;
@@ -74,8 +69,16 @@ grpc::Status CallWithFailover(EndpointManager& manager, const FailoverOptions& o
             return status;
         }
         manager.ReportFailure(index);
-        spdlog::warn("lb: endpoint {} unavailable ({}), failing over", index,
-                     status.error_message());
+        if (attempt + 1 < attempt_cap) {
+            spdlog::warn("lb: endpoint {} unavailable ({}), failing over", index,
+                         status.error_message());
+        } else {
+            // Terminal attempt: out of attempt budget — the single-endpoint
+            // case, all endpoints tried, or GRPC_LB_MAX_ATTEMPTS reached (which
+            // can stop us while untried endpoints remain), so we don't fail over.
+            spdlog::warn("lb: endpoint {} unavailable ({}), attempt budget exhausted",
+                         index, status.error_message());
+        }
         last_status = std::move(status);
     }
     return last_status;

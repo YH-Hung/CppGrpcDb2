@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -96,6 +97,40 @@ TEST(EndpointManager, SuccessResetsStreakAndReportsRecovery) {
     manager.ReportFailure(0);  // streak reset: cooldown is base again
     clock.Advance(milliseconds(1000));
     EXPECT_FALSE(manager.GetSnapshot(0).in_cooldown);
+}
+
+TEST(EndpointManager, RejectsZeroEndpoints) {
+    EXPECT_THROW(lb::EndpointManager(0), std::invalid_argument);
+}
+
+TEST(EndpointManager, SelectSkipsAlreadyTriedEndpoints) {
+    FakeClock clock;
+    lb::EndpointManager manager(3, TestOptions(), clock.Fn());
+    std::vector<bool> tried(3, false);
+    tried[0] = true;  // excluded even though round-robin would start here
+    EXPECT_EQ(manager.Select(tried), 1u);
+}
+
+TEST(EndpointManager, SelectThrowsWhenEveryEndpointExcluded) {
+    lb::EndpointManager manager(2, TestOptions());
+    std::vector<bool> tried(2, true);
+    EXPECT_THROW(manager.Select(tried), std::invalid_argument);
+}
+
+TEST(EndpointManager, SelectAllDownPicksSoonestUntried) {
+    // Regression for the failover fallback: when every endpoint is cooling down
+    // and the soonest-recovering one has already been tried, selection must land
+    // on the untried endpoint recovering soonest — not probe forward by index.
+    FakeClock clock;
+    lb::EndpointManager manager(3, TestOptions(), clock.Fn());
+    manager.ReportFailure(0);  // tried below; until t0+1000
+    manager.ReportFailure(2);  // until t0+1000 (soonest untried)
+    manager.ReportFailure(1);
+    manager.ReportFailure(1);  // 2nd consecutive: until t0+2000 (later untried)
+
+    std::vector<bool> tried(3, false);
+    tried[0] = true;
+    EXPECT_EQ(manager.Select(tried), 2u);  // not 1 (index-forward from 0)
 }
 
 TEST(EndpointManager, SingleEndpointAlwaysSelectedEvenInCooldown) {

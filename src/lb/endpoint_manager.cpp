@@ -1,7 +1,7 @@
 #include "lb/endpoint_manager.h"
 
 #include <algorithm>
-#include <cassert>
+#include <stdexcept>
 
 namespace lb {
 
@@ -15,25 +15,44 @@ EndpointManager::EndpointManager(std::size_t endpoint_count, const Options& opti
     : options_(options),
       clock_(clock ? clock : [] { return std::chrono::steady_clock::now(); }),
       states_(endpoint_count) {
-    assert(endpoint_count > 0);
+    if (endpoint_count == 0) {
+        throw std::invalid_argument("EndpointManager requires at least one endpoint");
+    }
 }
 
-std::size_t EndpointManager::Select() {
+std::size_t EndpointManager::Select() { return Select(std::vector<bool>{}); }
+
+std::size_t EndpointManager::Select(const std::vector<bool>& already_tried) {
     std::lock_guard<std::mutex> lock(mu_);
     const TimePoint now = clock_();
+    const auto tried = [&](std::size_t i) {
+        return i < already_tried.size() && already_tried[i];
+    };
+    // Round-robin over endpoints that are neither already tried nor in cooldown.
     for (std::size_t k = 0; k < states_.size(); ++k) {
         const std::size_t index = (cursor_ + k) % states_.size();
+        if (tried(index)) continue;
         if (states_[index].unavailable_until <= now) {
             cursor_ = (index + 1) % states_.size();
             return index;
         }
     }
-    // All endpoints cooling down: pick the one recovering soonest.
-    const auto soonest = std::min_element(
-        states_.begin(), states_.end(), [](const State& a, const State& b) {
-            return a.unavailable_until < b.unavailable_until;
-        });
-    return static_cast<std::size_t>(soonest - states_.begin());
+    // Every still-untried endpoint is cooling down: pick the one recovering
+    // soonest among them, rather than failing the call outright.
+    std::size_t soonest = states_.size();
+    for (std::size_t i = 0; i < states_.size(); ++i) {
+        if (tried(i)) continue;
+        if (soonest == states_.size() ||
+            states_[i].unavailable_until < states_[soonest].unavailable_until) {
+            soonest = i;
+        }
+    }
+    if (soonest == states_.size()) {
+        // Misuse: every endpoint was marked tried, so there is nothing to pick.
+        throw std::invalid_argument(
+            "EndpointManager::Select called with every endpoint marked tried");
+    }
+    return soonest;
 }
 
 bool EndpointManager::ReportSuccess(std::size_t index) {

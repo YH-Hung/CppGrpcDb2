@@ -180,7 +180,7 @@ target_compile_features(calldata_metrics PUBLIC cxx_std_20)
 # Client-side LB Library
 # ==============================================================================
 
-add_library(grpc_client_lb
+add_library(grpc_client_lb STATIC
         src/lb/endpoint_config.cpp
         src/lb/endpoint_manager.cpp
         src/lb/channel_factory.cpp
