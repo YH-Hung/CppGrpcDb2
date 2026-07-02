@@ -177,6 +177,28 @@ target_link_libraries(calldata_metrics
 target_compile_features(calldata_metrics PUBLIC cxx_std_20)
 
 # ==============================================================================
+# Client-side LB Library
+# ==============================================================================
+
+add_library(grpc_client_lb
+        src/lb/endpoint_config.cpp
+        src/lb/endpoint_manager.cpp
+        src/lb/channel_factory.cpp
+)
+
+target_include_directories(grpc_client_lb
+    PUBLIC ${PROJECT_SOURCE_DIR}/src
+)
+
+target_link_libraries(grpc_client_lb
+    PUBLIC ${_GRPC_GRPCPP}
+    PUBLIC ${SPDLOG_TARGET}
+    PRIVATE ${JSONCPP_TARGET}
+)
+
+target_compile_features(grpc_client_lb PUBLIC cxx_std_20)
+
+# ==============================================================================
 # DB2 Wrapper Library
 # ==============================================================================
 
@@ -370,6 +392,17 @@ target_include_directories(lb_endpoint_manager_tests PRIVATE ${PROJECT_SOURCE_DI
 target_link_libraries(lb_endpoint_manager_tests PRIVATE GTest::gtest GTest::gtest_main)
 add_test(NAME lb_endpoint_manager_tests COMMAND lb_endpoint_manager_tests)
 target_compile_features(lb_endpoint_manager_tests PRIVATE cxx_std_20)
+
+# LB channel factory unit tests
+add_executable(lb_channel_factory_tests tests/lb/test_channel_factory.cpp)
+target_link_libraries(lb_channel_factory_tests
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE grpc_client_lb
+    PRIVATE ${JSONCPP_TARGET}
+)
+add_test(NAME lb_channel_factory_tests COMMAND lb_channel_factory_tests)
+target_compile_features(lb_channel_factory_tests PRIVATE cxx_std_20)
 
 # CQ worker metrics unit tests
 add_executable(cq_worker_metrics_tests tests/metrics/test_cq_worker_metrics.cpp)
