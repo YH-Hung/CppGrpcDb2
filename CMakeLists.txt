@@ -404,6 +404,16 @@ target_link_libraries(lb_channel_factory_tests
 add_test(NAME lb_channel_factory_tests COMMAND lb_channel_factory_tests)
 target_compile_features(lb_channel_factory_tests PRIVATE cxx_std_20)
 
+# LB failover call unit tests
+add_executable(lb_failover_call_tests tests/lb/test_failover_call.cpp)
+target_link_libraries(lb_failover_call_tests
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE grpc_client_lb
+)
+add_test(NAME lb_failover_call_tests COMMAND lb_failover_call_tests)
+target_compile_features(lb_failover_call_tests PRIVATE cxx_std_20)
+
 # CQ worker metrics unit tests
 add_executable(cq_worker_metrics_tests tests/metrics/test_cq_worker_metrics.cpp)
 target_include_directories(cq_worker_metrics_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
