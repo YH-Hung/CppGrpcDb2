@@ -357,6 +357,13 @@ target_link_libraries(test_string_util PRIVATE GTest::gtest GTest::gtest_main)
 add_test(NAME test_string_util COMMAND test_string_util)
 target_compile_features(test_string_util PRIVATE cxx_std_20)
 
+# LB endpoint config unit tests
+add_executable(lb_endpoint_config_tests tests/lb/test_endpoint_config.cpp src/lb/endpoint_config.cpp)
+target_include_directories(lb_endpoint_config_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(lb_endpoint_config_tests PRIVATE GTest::gtest GTest::gtest_main)
+add_test(NAME lb_endpoint_config_tests COMMAND lb_endpoint_config_tests)
+target_compile_features(lb_endpoint_config_tests PRIVATE cxx_std_20)
+
 # CQ worker metrics unit tests
 add_executable(cq_worker_metrics_tests tests/metrics/test_cq_worker_metrics.cpp)
 target_include_directories(cq_worker_metrics_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
