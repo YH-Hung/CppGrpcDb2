@@ -36,6 +36,8 @@ grpc::ChannelArguments MakeChannelArguments(const ChannelFactoryOptions& options
     grpc::ChannelArguments args;
     args.SetServiceConfigJSON(BuildServiceConfigJson(options.multi_endpoint));
     args.SetInt(GRPC_ARG_ENABLE_RETRIES, 1);
+    // Only takes effect when a single endpoint's FQDN resolves to multiple
+    // A/AAAA records; balances gRPC's own subchannels across them.
     args.SetLoadBalancingPolicyName("round_robin");
     // Detect half-dead connections in seconds instead of at the TCP timeout.
     args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 10000);

@@ -1418,10 +1418,13 @@ Expected: `greeter_failover_client` builds; all tests pass (pre-existing suite +
 
 - [ ] **Step 4: Manually verify failover behavior**
 
-`greeter_callback_server_no_db2` defaults to port 50051. Nothing listens on 60000, so endpoint 0 is dead:
+Use `complex_proto_async` as the server — it serves `helloworld.Greeter` on
+port 50051 and links no DB2. (Do NOT use `greeter_callback_server_no_db2`: it
+registers only `hellogirl.GirlGreeter`, so `SayHello` returns `UNIMPLEMENTED`.)
+Nothing listens on 60000, so endpoint 0 is dead:
 
 ```bash
-./build/greeter_callback_server_no_db2 &
+./build/complex_proto_async 50051 &
 SERVER_PID=$!
 sleep 1
 GRPC_TARGET_ENDPOINTS="localhost:60000,localhost:50051" ./build/greeter_failover_client
@@ -1433,7 +1436,7 @@ Expected output: a `lb: endpoint 0 unavailable (...), failing over` warning, the
 Also verify the single-endpoint fallback path:
 
 ```bash
-./build/greeter_callback_server_no_db2 &
+./build/complex_proto_async 50051 &
 SERVER_PID=$!
 sleep 1
 GRPC_TARGET_ENDPOINTS="localhost:50051" ./build/greeter_failover_client

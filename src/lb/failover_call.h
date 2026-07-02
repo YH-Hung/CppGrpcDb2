@@ -13,6 +13,10 @@
 namespace lb {
 
 struct FailoverOptions {
+    // Deadline for a single endpoint attempt. This must exceed the channel's
+    // built-in retry budget (maxBackoff is 1s, see channel_factory), or an
+    // in-channel retry can be cut off before it completes. Total worst-case
+    // wall-clock for a failed call is up to endpoints_tried * attempt_timeout.
     std::chrono::milliseconds attempt_timeout{2000};
     int max_attempts = 0;  // <= 0: one attempt per endpoint
     std::vector<grpc::StatusCode> retriable_codes{grpc::StatusCode::UNAVAILABLE};
