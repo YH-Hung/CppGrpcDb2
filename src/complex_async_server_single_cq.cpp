@@ -16,6 +16,7 @@
 #include "call_data/GreeterSayHelloCallData.h"
 #include "call_data/HelloGirlSayHelloCallData.h"
 #include "message_logging_interceptor.h"
+#include "otel_tracing.h"
 #include "calldata_metrics.h"
 #include "cq_worker_metrics.h"
 #include <prometheus/exposer.h>
@@ -99,6 +100,7 @@ public:
         // Register message logging interceptor
         auto logging_factory = std::make_unique<MessageLoggingServerInterceptorFactory>();
         std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
+        interceptors.push_back(otel::MakeTracingServerInterceptorFactory());
         interceptors.push_back(std::move(logging_factory));
         builder.experimental().SetInterceptorCreators(std::move(interceptors));
 
@@ -175,6 +177,10 @@ private:
 };
 
 int main(int argc, char** argv) {
+    otel::TracingOptions tracing_options;
+    tracing_options.service_name = "complex_proto_async";
+    otel::InitTracing(tracing_options);
+
     uint16_t port = 50051;
     if (argc > 1) {
         port = static_cast<uint16_t>(std::stoi(argv[1]));
@@ -206,5 +212,6 @@ int main(int argc, char** argv) {
 
     spdlog::info("Server stopped.");
 
+    otel::ShutdownTracing();
     return 0;
 }

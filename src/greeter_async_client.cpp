@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include "helloworld.grpc.pb.h"
+#include "otel_tracing.h"
 
 using grpc::Channel;
 using grpc::ClientAsyncResponseReader;
@@ -40,12 +41,18 @@ public:
         void* got_tag;
         bool ok = false;
         cq.Next(&got_tag, &ok);
+        const std::string trace_id = otel::TraceIdForClientContext(&context);
 
         if (ok && got_tag == (void*)1 && status.ok()) {
+            std::cout << "[trace_id: " << trace_id << "] RPC succeeded"
+                      << std::endl;
+            otel::ClearClientContextTraceId(&context);
             return reply.message();
         } else {
-            std::cout << status.error_code() << ": " << status.error_message()
-                      << std::endl;
+            std::cout << "[trace_id: " << trace_id << "] "
+                      << status.error_code() << ": "
+                      << status.error_message() << std::endl;
+            otel::ClearClientContextTraceId(&context);
             return "RPC failed";
         }
     }
@@ -55,12 +62,17 @@ private:
 };
 
 int main(int argc, char** argv) {
+    otel::TracingOptions tracing_options;
+    tracing_options.service_name = "greeter_async_client";
+    otel::InitTracing(tracing_options);
+
     std::string target_str = "localhost:50051";
     GreeterClient greeter(
-        grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
+        otel::CreateTracingChannel(target_str, grpc::InsecureChannelCredentials()));
     std::string user("賴柔瑤");
     std::string reply = greeter.SayHello(user);
     std::cout << "Greeter received: " << reply << std::endl;
 
+    otel::ShutdownTracing();
     return 0;
 }

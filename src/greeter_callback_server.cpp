@@ -29,6 +29,7 @@
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
 #include "metrics_interceptor.h"
+#include "otel_tracing.h"
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -59,12 +60,13 @@ class GreeterServiceImpl final : public Greeter::CallbackService {
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
                                const HelloRequest* request,
                                HelloReply* reply) override {
-    spdlog::info("Received request for name: {}", request->name());
+    const std::string trace_id = otel::TraceIdForServerContext(context);
+    spdlog::info("[trace_id: {}] Received request for name: {}", trace_id, request->name());
 
     ServerUnaryReactor* reactor = context->DefaultReactor();
     // Check cancellation before doing any reply work
     if (context->IsCancelled()) {
-      spdlog::warn("Request was cancelled by client before processing.");
+      spdlog::warn("[trace_id: {}] Request was cancelled by client before processing.", trace_id);
       reactor->Finish(Status(grpc::StatusCode::CANCELLED, "Request cancelled"));
       return reactor;
     }
@@ -75,14 +77,14 @@ class GreeterServiceImpl final : public Greeter::CallbackService {
     if (pool_) {
       try {
         conn = pool_->acquire();
-        spdlog::info("Acquired DB2 resource from pool. in_use={}, idle={}",
-                     pool_->in_use(), pool_->idle_size());
+        spdlog::info("[trace_id: {}] Acquired DB2 resource from pool. in_use={}, idle={}",
+                     trace_id, pool_->in_use(), pool_->idle_size());
         // Demonstration only: no actual DB operations are performed.
       } catch (const std::exception& e) {
-        spdlog::error("Failed to acquire DB2 resource: {}", e.what());
+        spdlog::error("[trace_id: {}] Failed to acquire DB2 resource: {}", trace_id, e.what());
       }
     } else {
-      spdlog::warn("DB2 pool not available; proceeding without DB resource.");
+      spdlog::warn("[trace_id: {}] DB2 pool not available; proceeding without DB resource.", trace_id);
     }
 
     std::string prefix("Hello ");
@@ -110,14 +112,16 @@ void RunServer(uint16_t port) {
   
   // Set example transformation lambdas
   interceptor_factory->SetRequestTransform([](const std::string& input) -> std::string {
-    spdlog::info("Request transform: Uppercasing '{}'", input);
+    spdlog::info("[trace_id: {}] Request transform: Uppercasing '{}'",
+                 otel::CurrentTraceIdHex(), input);
     std::string result = input;
     std::transform(result.begin(), result.end(), result.begin(), ::toupper);
     return result;
   });
   
   interceptor_factory->SetResponseTransform([](const std::string& input) -> std::string {
-    spdlog::info("Response transform: Adding prefix to '{}'", input);
+    spdlog::info("[trace_id: {}] Response transform: Adding prefix to '{}'",
+                 otel::CurrentTraceIdHex(), input);
     return "[TRANSFORMED] " + input;
   });
 
@@ -147,6 +151,7 @@ void RunServer(uint16_t port) {
   // Register the string transformation interceptor factory and metrics factory
   auto metrics_factory = std::make_unique<MetricsServerInterceptorFactory>(registry);
   std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
+  interceptors.push_back(otel::MakeTracingServerInterceptorFactory());
   interceptors.push_back(std::move(interceptor_factory));
   interceptors.push_back(std::move(metrics_factory));
   builder.experimental().SetInterceptorCreators(std::move(interceptors));
@@ -165,6 +170,10 @@ void RunServer(uint16_t port) {
 }
 
 int main(int argc, char** argv) {
+  otel::TracingOptions tracing_options;
+  tracing_options.service_name = "greeter_callback_server";
+  otel::InitTracing(tracing_options);
   RunServer(50051);
+  otel::ShutdownTracing();
   return 0;
 }

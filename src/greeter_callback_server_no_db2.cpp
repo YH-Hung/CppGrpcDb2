@@ -21,6 +21,7 @@
 #include "health.grpc.pb.h"
 #include "spdlog/spdlog.h"
 #include "string_transform_interceptor.h"
+#include "otel_tracing.h"
 #include "utf8ansi.h"
 
 using grpc::CallbackServerContext;
@@ -46,20 +47,22 @@ class SimpleGreeterServiceImpl final : public GirlGreeter::CallbackService {
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
                                const HelloGirlRequest* request,
                                HelloGirlReply* reply) override {
-    spdlog::info("Received request for name: {}", request->name());
+    const std::string trace_id = otel::TraceIdForServerContext(context);
+    spdlog::info("[trace_id: {}] Received request for name: {}", trace_id, request->name());
 
     const auto& metadata = context->client_metadata();
     auto it = metadata.find("special_msg");
     if (it != metadata.end()) {
-      spdlog::info("special_msg metadata: {}", std::string(it->second.data(), it->second.size()));
+      spdlog::info("[trace_id: {}] special_msg metadata: {}",
+                   trace_id, std::string(it->second.data(), it->second.size()));
     } else {
-      spdlog::info("special_msg metadata not found in request");
+      spdlog::info("[trace_id: {}] special_msg metadata not found in request", trace_id);
     }
 
     ServerUnaryReactor* reactor = context->DefaultReactor();
     // Check cancellation before doing any reply work
     if (context->IsCancelled()) {
-      spdlog::warn("Request was cancelled by client before processing.");
+      spdlog::warn("[trace_id: {}] Request was cancelled by client before processing.", trace_id);
       reactor->Finish(Status(grpc::StatusCode::CANCELLED, "Request cancelled"));
       return reactor;
     }
@@ -113,21 +116,25 @@ void RunServer(uint16_t port) {
   auto interceptor_factory = std::make_unique<StringTransformServerInterceptorFactory>();
   
   interceptor_factory->SetRequestTransform([](const std::string& input) -> std::string {
-    spdlog::info("Request transform: utf8 -> big5 for '{}'", input);
+    spdlog::info("[trace_id: {}] Request transform: utf8 -> big5 for '{}'",
+                 otel::CurrentTraceIdHex(), input);
     try {
       return utf8ansi::utf8_to_big5(input);
     } catch (const std::exception& e) {
-      spdlog::error("utf8_to_big5 failed: {}", e.what());
+      spdlog::error("[trace_id: {}] utf8_to_big5 failed: {}",
+                    otel::CurrentTraceIdHex(), e.what());
       return input; // fallback to original
     }
   });
   
   interceptor_factory->SetResponseTransform([](const std::string& input) -> std::string {
-    spdlog::info("Response transform: big5 -> utf8");
+    spdlog::info("[trace_id: {}] Response transform: big5 -> utf8",
+                 otel::CurrentTraceIdHex());
     try {
       return utf8ansi::big5_to_utf8(input);
     } catch (const std::exception& e) {
-      spdlog::error("big5_to_utf8 failed: {}", e.what());
+      spdlog::error("[trace_id: {}] big5_to_utf8 failed: {}",
+                    otel::CurrentTraceIdHex(), e.what());
       return input; // fallback to original
     }
   });
@@ -142,6 +149,7 @@ void RunServer(uint16_t port) {
   
   // Register the string transformation interceptor factory
   std::vector<std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>> interceptors;
+  interceptors.push_back(otel::MakeTracingServerInterceptorFactory());
   interceptors.push_back(std::move(interceptor_factory));
   builder.experimental().SetInterceptorCreators(std::move(interceptors));
 
@@ -171,11 +179,15 @@ void RunServer(uint16_t port) {
 
 int main(int argc, char** argv) {
   spdlog::set_level(spdlog::level::debug);
+  otel::TracingOptions tracing_options;
+  tracing_options.service_name = "greeter_callback_server_no_db2";
+  otel::InitTracing(tracing_options);
   uint16_t port = 50051;
   if (argc > 1) {
     port = static_cast<uint16_t>(std::stoi(argv[1]));
   }
   RunServer(port);
+  otel::ShutdownTracing();
   return 0;
 }
 

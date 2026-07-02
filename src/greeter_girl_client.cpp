@@ -6,6 +6,7 @@
 #include <utf8ansi.h>
 
 #include "hello_girl.grpc.pb.h"
+#include "otel_tracing.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -38,6 +39,7 @@ public:
 
         // The actual RPC.
         Status status = stub_->SayHello(&context, request, &reply);
+        const std::string trace_id = otel::TraceIdForClientContext(&context);
 
         // Act upon its status.
         if (status.ok()) {
@@ -46,10 +48,15 @@ public:
                 << "marriage='" << reply.marriage() << "'\n"
                 << "size=" << reply.size() << "'\n"
                 << "reply_secret=" << reply.reply_secret();
+            std::cout << "[trace_id: " << trace_id << "] RPC succeeded"
+                      << std::endl;
+            otel::ClearClientContextTraceId(&context);
             return oss.str();
         } else {
-            std::cout << status.error_code() << ": " << status.error_message()
-                      << std::endl;
+            std::cout << "[trace_id: " << trace_id << "] "
+                      << status.error_code() << ": "
+                      << status.error_message() << std::endl;
+            otel::ClearClientContextTraceId(&context);
             return "RPC failed";
         }
     }
@@ -59,9 +66,13 @@ private:
 };
 
 int main(int argc, char** argv) {
+    otel::TracingOptions tracing_options;
+    tracing_options.service_name = "greeter_girl_client";
+    otel::InitTracing(tracing_options);
+
     std::string target_str = "localhost:50051";
     GirlGreeterClient client(
-        grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
+        otel::CreateTracingChannel(target_str, grpc::InsecureChannelCredentials()));
 
     // Example values similar to greeter_client.cpp style
     std::string name = "賴柔瑤";
@@ -72,5 +83,6 @@ int main(int argc, char** argv) {
     auto reply = client.SayHello(name, spouse, first_round, secret_note);
     std::cout << "GirlGreeter received:\n" << reply << std::endl;
 
+    otel::ShutdownTracing();
     return 0;
 }
