@@ -348,3 +348,23 @@ Troubleshooting
 grpcurl -plaintext localhost:50051 describe
 grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
 ```
+
+## Client-side failover load balancing
+
+`greeter_failover_client` demonstrates client-side LB across multiple FQDN
+endpoints with failover on `UNAVAILABLE`:
+
+```bash
+GRPC_TARGET_ENDPOINTS="svc-a.example.com:50051,svc-b.example.com:50051" ./build/greeter_failover_client
+```
+
+- `GRPC_TARGET_ENDPOINTS` — comma-separated `host:port` list (default `localhost:50051`)
+- `GRPC_LB_COOLDOWN_BASE_MS` — base cooldown for a failing endpoint, doubles per
+  consecutive failure, capped at 30 s (default `1000`)
+- `GRPC_LB_MAX_ATTEMPTS` — max endpoints tried per call (default: all)
+
+With a single endpoint the client relies purely on gRPC's built-in retry
+(service config) and `round_robin` over the FQDN's DNS records. With multiple
+endpoints, the built-in retry budget per channel is lowered (`maxAttempts` 2)
+and endpoint-level failover moves the call to the next FQDN. Design:
+`doc/client-grpc-failover-lb-design.md`.

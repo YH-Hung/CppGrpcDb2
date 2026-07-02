@@ -253,6 +253,12 @@ target_link_libraries(greeter_girl_client
         PRIVATE utf8ansi::utf8ansi
 )
 
+# Failover LB demo client (no DB2)
+create_grpc_executable(greeter_failover_client "src/greeter_failover_client.cpp")
+target_link_libraries(greeter_failover_client
+    PRIVATE grpc_client_lb
+)
+
 # ==============================================================================
 # Test and Utility Executables
 # ==============================================================================

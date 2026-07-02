@@ -39,6 +39,7 @@ This is a C++20 gRPC/protobuf playground demonstrating several server styles bac
 - **`src/db2/` + `include/db2/db2.hpp`** → thin RAII wrapper over DB2 CLI handles. The `db2_wrapper` static lib is linked into servers via `add_db2_support()`.
 - **`src/worker/WorkerPool.h`** + **`src/resource/resource_pool.hpp`** → header-only utilities. `src/` is on the include path globally, so they're included by relative path from anywhere.
 - **`src/util/`** → `sql_util`, `string_util` etc. These are deliberately built into each test target from sources (not a shared lib) so tests stay narrow.
+- **`src/lb/` (`grpc_client_lb`)** → client-side failover LB across multiple FQDN endpoints (`GRPC_TARGET_ENDPOINTS`); see `doc/client-grpc-failover-lb-design.md`. Demo: `greeter_failover_client`.
 - **`src/msvc/`** → portability shims (`strset`, `strupr`, `stricmp`, ...) with one GTest per shim under `tests/msvc/`.
 
 ### CMake conventions
