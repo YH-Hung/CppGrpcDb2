@@ -27,16 +27,21 @@ using helloworld::HelloRequest;
 // Minimal Greeter service that stamps its own listening port into the reply,
 // so the test can correlate CallResult.served_by with the server that actually
 // handled the request. Tracks per-server call counts for round-robin checks.
-// Supports configurable behavior: a per-call delay and an error status to
-// return instead of OK (for deadline / non-retriable-error coverage).
+// Supports configurable behavior: a per-call delay, an error status to
+// return instead of OK (for deadline / non-retriable-error coverage), and
+// a "fail the first N calls" counter (for built-in retry coverage).
 class ConfigurableGreeter : public Greeter::Service {
 public:
     Status SayHello(ServerContext* /*context*/, const HelloRequest* request,
                     HelloReply* reply) override {
-        ++calls_;
+        const int n = ++calls_;
         if (delay_ms_.load() > 0) {
             std::this_thread::sleep_for(
                 std::chrono::milliseconds(delay_ms_.load()));
+        }
+        // "Fail first N" takes priority over the static error_code.
+        if (n <= fail_first_n_.load()) {
+            return Status(StatusCode::UNAVAILABLE, "injected transient failure");
         }
         if (error_code_.load() != 0) {
             return Status(static_cast<StatusCode>(error_code_.load()),
@@ -52,6 +57,7 @@ public:
     int calls() const { return calls_.load(); }
     void set_delay_ms(int ms) { delay_ms_ = ms; }
     void set_error_code(int code) { error_code_ = code; }
+    void set_fail_first_n(int n) { fail_first_n_ = n; }
     void reset_calls() { calls_ = 0; }
 
 private:
@@ -59,6 +65,7 @@ private:
     std::atomic<int> calls_{0};
     std::atomic<int> delay_ms_{0};
     std::atomic<int> error_code_{0};
+    std::atomic<int> fail_first_n_{0};
 };
 
 // RAII handle for one in-process gRPC server on an ephemeral port.
@@ -501,6 +508,52 @@ TEST_F(FailoverLiveTest, SingleEndpointSucceedsWithoutFailover) {
     EXPECT_TRUE(result.status.ok()) << result.status.error_message();
     EXPECT_EQ(result.served_by, target);
     EXPECT_EQ(single->service->calls(), 1);
+}
+
+// 11. Single-endpoint built-in gRPC retry: with one endpoint, the channel's
+// service-config retryPolicy (maxAttempts=4, retriable on UNAVAILABLE) handles
+// transient failures transparently — the app-level loop does exactly one
+// attempt. Inject 2 transient UNAVAILABLEs on the server; the client should
+// still get OK (via built-in retry within the channel), and the server should
+// have seen 3 calls (2 failed + 1 succeeded). This proves built-in retry is
+// active in single-endpoint mode without any app-level failover.
+//
+// Note: DNS multi-address round_robin (one FQDN resolving to multiple
+// A/AAAA records, balanced by gRPC's round_robin LB policy) is not covered
+// here — it requires DNS infrastructure unavailable to an in-process
+// localhost test.
+TEST_F(FailoverLiveTest, SingleEndpointBuiltInRetryHandlesTransientFailure) {
+    handles_.clear();
+    targets_.clear();
+
+    auto single = StartServer();
+    if (!single) {
+        GTEST_SKIP() << "could not bind ephemeral server port";
+        return;
+    }
+    const std::string target = Target(single->selected_port);
+
+    // Fail the first 2 calls, then succeed.
+    single->service->set_fail_first_n(2);
+
+    lb::LbConfig config;
+    config.endpoints = {{"127.0.0.1", single->selected_port}};
+    // Single endpoint → ChannelFactoryOptions.multi_endpoint=false →
+    // service-config retryPolicy maxAttempts=4.
+    lb::FailoverClient<Greeter> client(std::move(config),
+                                       [](std::shared_ptr<grpc::Channel> ch) {
+                                           return Greeter::NewStub(ch);
+                                       });
+
+    const lb::CallResult result = SayHello(client, "retry");
+    EXPECT_TRUE(result.status.ok()) << result.status.error_message();
+    EXPECT_EQ(result.served_by, target);
+    // Server saw 3 calls: 2 transient failures + 1 success. This proves
+    // built-in retry happened within the channel — the app-level loop only
+    // does 1 attempt with a single endpoint.
+    EXPECT_GE(single->service->calls(), 3)
+        << "expected >=3 server calls (2 transient + 1 success via built-in retry), "
+        << "got " << single->service->calls();
 }
 
 }  // namespace
