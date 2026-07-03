@@ -27,11 +27,14 @@ ParseResult ParseEndpoints(std::string_view csv);
 struct LbConfig {
     std::vector<Endpoint> endpoints;
     std::chrono::milliseconds cooldown_base{1000};
-    int max_attempts = 1;               // resolved: min(env value, endpoint count)
+    std::chrono::milliseconds attempt_timeout{2000};
+    int max_attempts = 0;               // 0 = all endpoints; resolved by CallWithFailover.
+                                        // LoadLbConfigFromEnv resolves to min(env, count).
     std::vector<std::string> rejected;  // for caller-side logging
 };
 
-// Reads GRPC_TARGET_ENDPOINTS, GRPC_LB_COOLDOWN_BASE_MS, GRPC_LB_MAX_ATTEMPTS.
+// Reads GRPC_TARGET_ENDPOINTS, GRPC_LB_COOLDOWN_BASE_MS,
+// GRPC_LB_MAX_ATTEMPTS, GRPC_LB_ATTEMPT_TIMEOUT_MS.
 // Unset, empty, or fully rejected endpoint list falls back to localhost:50051.
 LbConfig LoadLbConfigFromEnv();
 

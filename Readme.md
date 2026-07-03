@@ -351,20 +351,58 @@ grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
 
 ## Client-side failover load balancing
 
-`greeter_failover_client` demonstrates client-side LB across multiple FQDN
-endpoints with failover on `UNAVAILABLE`:
+`greeter_failover_client` sends each RPC to one of several server addresses
+and, if that address is unreachable, automatically retries the same RPC on the
+next one. Configure the address list with one environment variable:
 
 ```bash
-GRPC_TARGET_ENDPOINTS="svc-a.example.com:50051,svc-b.example.com:50051" ./build/greeter_failover_client
+GRPC_TARGET_ENDPOINTS="svc-a.example.com:50051,svc-b.example.com:50051" \
+  ./build/greeter_failover_client
 ```
 
-- `GRPC_TARGET_ENDPOINTS` — comma-separated `host:port` list (default `localhost:50051`)
-- `GRPC_LB_COOLDOWN_BASE_MS` — base cooldown for a failing endpoint, doubles per
-  consecutive failure, capped at 30 s (default `1000`)
-- `GRPC_LB_MAX_ATTEMPTS` — max endpoints tried per call (default: all)
+### Environment variables
 
-With a single endpoint the client relies purely on gRPC's built-in retry
-(service config) and `round_robin` over the FQDN's DNS records. With multiple
-endpoints, the built-in retry budget per channel is lowered (`maxAttempts` 2)
-and endpoint-level failover moves the call to the next FQDN. Design:
-`doc/client-grpc-failover-lb-design.md`.
+| Variable | Default | Meaning |
+|---|---|---|
+| `GRPC_TARGET_ENDPOINTS` | `localhost:50051` | Comma-separated `host:port` list of gRPC servers to call. Whitespace around entries is ignored. Malformed entries (missing/non-numeric port) are skipped with a warning; if every entry is malformed, the default is used. |
+| `GRPC_LB_COOLDOWN_BASE_MS` | `1000` | When a server fails, it is temporarily removed from rotation. This is the initial pause (in ms) before that server is tried again. The pause doubles after each consecutive failure (1s → 2s → 4s …) up to a 30s ceiling, so a flaky server is retried less and less aggressively. The first successful RPC resets the pause to the base value. |
+| `GRPC_LB_MAX_ATTEMPTS` | number of endpoints | How many distinct servers to try for a single RPC before giving up and returning the error. Capped at the endpoint count, so `GRPC_LB_MAX_ATTEMPTS=99` with two endpoints still tries at most two. Set to `1` to disable failover entirely (one attempt, then return). |
+| `GRPC_LB_ATTEMPT_TIMEOUT_MS` | `2000` | Per-attempt deadline in milliseconds. Each endpoint try gets this budget; a fresh `grpc::ClientContext` is created per attempt (contexts are single-use). Worst-case wall-clock for a failed call is `endpoints_tried × attempt_timeout`. A timed-out attempt returns `DEADLINE_EXCEEDED`, which is **not** retriable by default — a slow endpoint returns immediately rather than failing over. Add `grpc::StatusCode::DEADLINE_EXCEEDED` to `FailoverOptions::retriable_codes` (via the low-level API) if you want a slow endpoint to trigger failover to the next. `0` is rejected and falls back to the default. |
+
+### What happens with one endpoint vs. several
+
+- **One endpoint.** The client behaves like a normal gRPC client: it relies on
+  gRPC's built-in retry (transparent retries within the channel, up to four
+  attempts) and balances across whatever IP addresses the single host name
+  resolves to. No app-level failover.
+- **Multiple endpoints.** Each address gets its own channel. gRPC's built-in
+  retry is reduced to two attempts per channel (to keep total latency bounded
+  once the app-level loop starts stacking attempts), and on an `UNAVAILABLE`
+  status the client moves the RPC to the next address. Application errors
+  (`INVALID_ARGUMENT`, `PERMISSION_DENIED`, …) are returned immediately — they
+  can never succeed on a different server, so there is no point trying.
+
+### Using the library from your own client
+
+```cpp
+#include "lb/failover_client.h"
+#include "helloworld.grpc.pb.h"
+
+lb::FailoverClient<Greeter> client =
+    lb::FailoverClient<Greeter>::FromEnv();
+
+helloworld::HelloRequest req;
+req.set_name("world");
+helloworld::HelloReply reply;
+
+const lb::CallResult result = client.Call(req, reply, &Greeter::Stub::SayHello);
+if (result.status.ok()) {
+    std::cout << reply.message() << " (served by " << result.served_by << ")\n";
+}
+```
+
+`FromEnv()` reads the four variables above. For tests or TLS, pass an explicit
+`lb::LbConfig` and a custom channel/stub factory to the constructor. The
+low-level pieces (`EndpointManager`, `CallWithFailover`, `channel_factory`)
+remain available for advanced use cases. See
+`doc/client-grpc-failover-lb-design.md` for the full design.

@@ -207,6 +207,7 @@ add_library(grpc_client_lb STATIC
         src/lb/endpoint_config.cpp
         src/lb/endpoint_manager.cpp
         src/lb/channel_factory.cpp
+        src/lb/failover_client.cpp
 )
 
 target_include_directories(grpc_client_lb
@@ -449,6 +450,16 @@ target_link_libraries(lb_failover_call_tests
 )
 add_test(NAME lb_failover_call_tests COMMAND lb_failover_call_tests)
 target_compile_features(lb_failover_call_tests PRIVATE cxx_std_20)
+
+# LB FailoverClient facade unit tests
+add_executable(lb_failover_client_tests tests/lb/test_failover_client.cpp)
+target_link_libraries(lb_failover_client_tests
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE grpc_client_lb
+)
+add_test(NAME lb_failover_client_tests COMMAND lb_failover_client_tests)
+target_compile_features(lb_failover_client_tests PRIVATE cxx_std_20)
 
 # CQ worker metrics unit tests
 add_executable(cq_worker_metrics_tests tests/metrics/test_cq_worker_metrics.cpp)

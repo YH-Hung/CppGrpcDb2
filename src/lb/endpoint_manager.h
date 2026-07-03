@@ -9,6 +9,11 @@
 
 namespace lb {
 
+// Default cooldown ceiling shared by the facade and any caller that doesn't
+// want to pick its own. Distinct from the gRPC service-config maxBackoff
+// (which bounds in-channel retry backoff, not app-level cooldown).
+inline constexpr std::chrono::milliseconds kDefaultCooldownCap{30000};
+
 // Round-robin endpoint selection with exponential cooldown for failing
 // endpoints. Indices refer to a caller-owned parallel container of
 // channels/stubs. Thread-safe. gRPC-free; the clock is injectable so cooldown

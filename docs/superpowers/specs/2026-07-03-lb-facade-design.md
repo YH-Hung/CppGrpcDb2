@@ -74,13 +74,38 @@ struct CallResult {
     std::string served_by;  // endpoint target that handled the call; empty on total failure
 };
 
-template <typename StubT>
-class FailoverClient {
+// Non-template base owning channels, the EndpointManager (held via unique_ptr
+// because EndpointManager contains a mutex and is therefore immovable), and
+// the pre-wired FailoverOptions. The template subclass adds typed stubs.
+class FailoverClientBase {
 public:
+    FailoverClientBase(LbConfig config, ChannelBuilder channel_builder);
+    // movable (manager_ is unique_ptr), non-copyable.
+    template <typename Fn>
+    CallResult CallIndexed(Fn&& rpc);  // runs CallWithFailover, resolves served_by
+    std::size_t endpoint_count() const;
+    const std::vector<Endpoint>& endpoints() const;
+    EndpointManager::Snapshot snapshot(std::size_t index) const;
+    const FailoverOptions& failover_options() const;
+protected:
+    std::vector<Endpoint> endpoints_;
+    std::vector<std::shared_ptr<grpc::Channel>> channels_;
+    std::unique_ptr<EndpointManager> manager_;
+    FailoverOptions failover_options_;
+};
+
+// ServiceT is a gRPC generated service type (e.g. helloworld::Greeter) exposing
+// static NewStub(std::shared_ptr<grpc::ChannelInterface>) and a nested Stub
+// class — the universal gRPC convention. The stub type is derived as
+// typename ServiceT::Stub.
+template <typename ServiceT>
+class FailoverClient : public FailoverClientBase {
+public:
+    using StubT = typename ServiceT::Stub;
     using StubFactory =
         std::function<std::unique_ptr<StubT>(std::shared_ptr<grpc::Channel>)>;
 
-    // Default: env config, InsecureChannelCredentials, StubT::NewStub.
+    // Default: env config, InsecureChannelCredentials, ServiceT::NewStub.
     static FailoverClient FromEnv();
     // Same, with custom stub factory and/or channel builder (TLS, fakes).
     static FailoverClient FromEnv(const StubFactory& stub_factory,
@@ -90,31 +115,43 @@ public:
                    ChannelBuilder channel_builder = nullptr);
 
     // Lambda form: rpc(stub, context, request, response) -> grpc::Status.
-    // Works for streaming methods where there's no &request, &response pair.
+    // Works for unary sync RPCs and for streams consumed entirely inside the
+    // lambda. To return a live stream to the caller, use EndpointManager +
+    // stubs() directly.
     template <typename Req, typename Resp, typename Fn>
     CallResult Call(const Req& request, Resp& response, Fn&& rpc);
 
-    // Pointer-to-member convenience for unary sync RPCs.
+    // Pointer-to-member convenience for unary sync RPCs. The unary stub method
+    // signature is Status(ClientContext*, const Req&, Resp*).
     template <typename Req, typename Resp>
     CallResult Call(const Req& request, Resp& response,
                     grpc::Status (StubT::*method)(grpc::ClientContext*,
-                                                  const Req*, Resp*));
+                                                  const Req&, Resp*));
 
-    std::size_t endpoint_count() const;
-    const std::vector<Endpoint>& endpoints() const;
-    EndpointManager::Snapshot snapshot(std::size_t index) const;
-    const FailoverOptions& failover_options() const;
+    const std::vector<std::unique_ptr<StubT>>& stubs() const;
 
 private:
-    std::vector<Endpoint> endpoints_;
-    std::vector<std::shared_ptr<grpc::Channel>> channels_;
     std::vector<std::unique_ptr<StubT>> stubs_;
-    EndpointManager manager_;
-    FailoverOptions failover_options_;
 };
 
 }  // namespace lb
 ```
+
+### Implementation notes
+
+- The template parameter is the **service** type (`Greeter`), not the stub
+  type, because gRPC's `NewStub` is a static on the service class, not on
+  `Stub`. The stub type is derived as `typename ServiceT::Stub`. The demo
+  becomes `FailoverClient<Greeter>::FromEnv()`.
+- `FailoverClientBase` holds the `EndpointManager` via `unique_ptr` because
+  `EndpointManager` contains a `std::mutex` and is therefore neither copyable
+  nor movable. This keeps the facade movable so `FromEnv()` can return by
+  value. `CallIndexed` dereferences `*manager_` when calling
+  `CallWithFailover`.
+- The unary pointer-to-member signature matches gRPC's actual generated stub
+  methods: `Status(ClientContext*, const Req&, Resp*)` — request by const
+  reference, response by pointer. The lambda form (`rpc(*stubs_[index], ctx,
+  request, response)`) dereferences the `unique_ptr<StubT>`.
 
 ### `Call()` implementation
 
@@ -164,8 +201,8 @@ header since it names `StubT`.
 
 ```cpp
 int main(int argc, char** argv) {
-    lb::FailoverClient<Greeter::Stub> client =
-        lb::FailoverClient<Greeter::Stub>::FromEnv();
+    lb::FailoverClient<Greeter> client =
+        lb::FailoverClient<Greeter>::FromEnv();
 
     HelloRequest request;
     request.set_name("賴柔瑤");

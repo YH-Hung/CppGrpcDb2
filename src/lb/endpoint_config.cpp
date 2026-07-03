@@ -69,6 +69,8 @@ LbConfig LoadLbConfigFromEnv() {
     }
     config.cooldown_base =
         std::chrono::milliseconds(ParsePositiveIntEnv("GRPC_LB_COOLDOWN_BASE_MS", 1000));
+    config.attempt_timeout =
+        std::chrono::milliseconds(ParsePositiveIntEnv("GRPC_LB_ATTEMPT_TIMEOUT_MS", 2000));
     const int endpoint_count = static_cast<int>(config.endpoints.size());
     config.max_attempts =
         std::min(ParsePositiveIntEnv("GRPC_LB_MAX_ATTEMPTS", endpoint_count), endpoint_count);

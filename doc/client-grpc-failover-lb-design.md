@@ -57,6 +57,7 @@ Environment contract:
 GRPC_TARGET_ENDPOINTS="svc-a.corp.example.com:50051, svc-b.corp.example.com:50051"
 GRPC_LB_COOLDOWN_BASE_MS=1000        # optional, default 1000
 GRPC_LB_MAX_ATTEMPTS=<n>             # optional, default = endpoint count
+GRPC_LB_ATTEMPT_TIMEOUT_MS=2000      # optional, default 2000 (per-attempt deadline)
 ```
 
 - `ParseEndpoints(std::string_view)` → `std::vector<Endpoint>`: splits on commas, trims
