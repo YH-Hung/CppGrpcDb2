@@ -461,6 +461,21 @@ target_link_libraries(lb_failover_client_tests
 add_test(NAME lb_failover_client_tests COMMAND lb_failover_client_tests)
 target_compile_features(lb_failover_client_tests PRIVATE cxx_std_20)
 
+# LB failover live integration test (3 in-process servers, real channels)
+add_executable(lb_failover_live_tests tests/lb/test_failover_live.cpp)
+target_include_directories(lb_failover_live_tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/src
+    PRIVATE "${generated_dir}"
+)
+target_link_libraries(lb_failover_live_tests
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE grpc_client_lb
+    PRIVATE helloworld_proto
+)
+add_test(NAME lb_failover_live_tests COMMAND lb_failover_live_tests)
+target_compile_features(lb_failover_live_tests PRIVATE cxx_std_20)
+
 # CQ worker metrics unit tests
 add_executable(cq_worker_metrics_tests tests/metrics/test_cq_worker_metrics.cpp)
 target_include_directories(cq_worker_metrics_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
