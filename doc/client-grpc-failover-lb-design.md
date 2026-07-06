@@ -98,6 +98,9 @@ One channel per FQDN, all sharing `ChannelArguments`:
   `src/greeter_client.cpp`), built with jsoncpp. In multi-endpoint mode `maxAttempts` is
   lowered to 2 to bound worst-case latency — app-level attempts multiply with built-in
   attempts (retry amplification). In single-endpoint mode `maxAttempts` stays 4.
+  `ChannelFactoryOptions` can override `maxAttempts` in single-endpoint mode only
+  (multi-endpoint stays pinned to 2) and set `initialBackoff`/`maxBackoff`
+  (defaults 0.1s/1s).
 - `grpc.lb_policy_name = round_robin` so a single FQDN resolving to multiple A/AAAA
   records is still balanced by gRPC itself.
 - Keepalive args (`GRPC_ARG_KEEPALIVE_TIME_MS = 10000`,

@@ -4,11 +4,29 @@
 
 namespace lb {
 
-std::string BuildServiceConfigJson(bool multi_endpoint) {
+namespace {
+
+// proto3 Duration JSON form: decimal seconds with an "s" suffix, e.g. "0.25s".
+std::string FormatSeconds(std::chrono::milliseconds duration) {
+    const auto ms = duration.count();
+    std::string out = std::to_string(ms / 1000);
+    if (ms % 1000 != 0) {
+        std::string frac = std::to_string(ms % 1000);
+        frac.insert(0, 3 - frac.size(), '0');
+        while (frac.back() == '0') frac.pop_back();
+        out += "." + frac;
+    }
+    return out + "s";
+}
+
+}  // namespace
+
+std::string BuildServiceConfigJson(const ChannelFactoryOptions& options) {
     Json::Value retry_policy;
-    retry_policy["maxAttempts"] = multi_endpoint ? 2 : 4;
-    retry_policy["initialBackoff"] = "0.1s";
-    retry_policy["maxBackoff"] = "1s";
+    retry_policy["maxAttempts"] =
+        options.multi_endpoint ? 2 : options.max_attempts.value_or(4);
+    retry_policy["initialBackoff"] = FormatSeconds(options.initial_backoff);
+    retry_policy["maxBackoff"] = FormatSeconds(options.max_backoff);
     retry_policy["backoffMultiplier"] = 2;
     Json::Value retryable_codes(Json::arrayValue);
     retryable_codes.append("UNAVAILABLE");
@@ -34,7 +52,7 @@ std::string BuildServiceConfigJson(bool multi_endpoint) {
 
 grpc::ChannelArguments MakeChannelArguments(const ChannelFactoryOptions& options) {
     grpc::ChannelArguments args;
-    args.SetServiceConfigJSON(BuildServiceConfigJson(options.multi_endpoint));
+    args.SetServiceConfigJSON(BuildServiceConfigJson(options));
     args.SetInt(GRPC_ARG_ENABLE_RETRIES, 1);
     // Only takes effect when a single endpoint's FQDN resolves to multiple
     // A/AAAA records; balances gRPC's own subchannels across them.

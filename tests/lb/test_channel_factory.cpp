@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include <json/json.h>
 
+#include <chrono>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -19,7 +20,8 @@ Json::Value ParseJson(const std::string& text) {
 }
 
 TEST(BuildServiceConfigJson, MultiEndpointLowersRetryBudget) {
-    const Json::Value config = ParseJson(lb::BuildServiceConfigJson(true));
+    const Json::Value config =
+        ParseJson(lb::BuildServiceConfigJson(lb::ChannelFactoryOptions{true}));
     const Json::Value& entry = config["methodConfig"][0];
     EXPECT_EQ(entry["retryPolicy"]["maxAttempts"].asInt(), 2);
     // An empty name entry matches every service and method on the channel.
@@ -30,8 +32,40 @@ TEST(BuildServiceConfigJson, MultiEndpointLowersRetryBudget) {
 }
 
 TEST(BuildServiceConfigJson, SingleEndpointKeepsFullRetryBudget) {
-    const Json::Value config = ParseJson(lb::BuildServiceConfigJson(false));
+    const Json::Value config =
+        ParseJson(lb::BuildServiceConfigJson(lb::ChannelFactoryOptions{false}));
     EXPECT_EQ(config["methodConfig"][0]["retryPolicy"]["maxAttempts"].asInt(), 4);
+}
+
+TEST(BuildServiceConfigJson, DefaultBackoffsMatchPreviousHardcodedValues) {
+    const Json::Value config =
+        ParseJson(lb::BuildServiceConfigJson(lb::ChannelFactoryOptions{}));
+    const Json::Value& policy = config["methodConfig"][0]["retryPolicy"];
+    EXPECT_EQ(policy["initialBackoff"].asString(), "0.1s");
+    EXPECT_EQ(policy["maxBackoff"].asString(), "1s");
+}
+
+TEST(BuildServiceConfigJson, SingleEndpointHonorsMaxAttemptsOverride) {
+    const Json::Value config = ParseJson(lb::BuildServiceConfigJson(
+        lb::ChannelFactoryOptions{.multi_endpoint = false, .max_attempts = 3}));
+    EXPECT_EQ(config["methodConfig"][0]["retryPolicy"]["maxAttempts"].asInt(), 3);
+}
+
+TEST(BuildServiceConfigJson, MultiEndpointIgnoresMaxAttemptsOverride) {
+    // The lowered budget bounds retry amplification: app-level failover
+    // attempts multiply with in-channel retries.
+    const Json::Value config = ParseJson(lb::BuildServiceConfigJson(
+        lb::ChannelFactoryOptions{.multi_endpoint = true, .max_attempts = 5}));
+    EXPECT_EQ(config["methodConfig"][0]["retryPolicy"]["maxAttempts"].asInt(), 2);
+}
+
+TEST(BuildServiceConfigJson, CustomBackoffsAreFormattedAsSeconds) {
+    const Json::Value config = ParseJson(lb::BuildServiceConfigJson(
+        lb::ChannelFactoryOptions{.initial_backoff = std::chrono::milliseconds{250},
+                                  .max_backoff = std::chrono::milliseconds{5000}}));
+    const Json::Value& policy = config["methodConfig"][0]["retryPolicy"];
+    EXPECT_EQ(policy["initialBackoff"].asString(), "0.25s");
+    EXPECT_EQ(policy["maxBackoff"].asString(), "5s");
 }
 
 TEST(BuildChannels, UsesInjectedBuilderOncePerEndpoint) {
