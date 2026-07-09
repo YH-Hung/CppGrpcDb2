@@ -1,0 +1,67 @@
+# L7 gRPC proxy fronting the three MockServer instances on one endpoint, so
+# the failover client can be tested in single-endpoint mode: the app-level
+# failover loop makes one attempt and recovery falls back to the channel's
+# built-in service-config retry.
+#
+# Two deliberate choices:
+# - No active health checks and no Envoy-side retries: a stopped backend
+#   keeps getting picked and fails the call, which must surface to the
+#   client so its retry policy does the recovery.
+# - dns_refresh_rate 300s: with STRICT_DNS, Docker DNS drops a stopped
+#   container's name; a long refresh keeps the dead endpoint in rotation
+#   for the duration of a test run instead of Envoy routing around it.
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+static_resources:
+  listeners:
+    - name: grpc_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 50050 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: grpc_proxy
+                codec_type: AUTO
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: greeter
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: greeter_mocks
+                            timeout: 15s
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    - name: greeter_mocks
+      connect_timeout: 1s
+      type: STRICT_DNS
+      dns_refresh_rate: 300s
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: greeter_mocks
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: mock1, port_value: 1080 }
+              - endpoint:
+                  address:
+                    socket_address: { address: mock2, port_value: 1080 }
+              - endpoint:
+                  address:
+                    socket_address: { address: mock3, port_value: 1080 }

@@ -43,3 +43,6 @@
 
 /.cache
 /.air/
+
+# MockServer live-test runtime artifacts (descriptor set, expectations, scratch output)
+tests/lb/mockserver/gen/

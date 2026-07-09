@@ -1,7 +1,11 @@
 #include <grpcpp/grpcpp.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
+#include <chrono>
 #include <iostream>
 #include <string>
+#include <thread>
 
 #include "helloworld.grpc.pb.h"
 #include "lb/failover_client.h"
@@ -11,23 +15,66 @@ using helloworld::Greeter;
 using helloworld::HelloReply;
 using helloworld::HelloRequest;
 
+namespace {
+
+// Parses a decimal integer argument >= min_value. Returns false on trailing
+// garbage, out-of-range, or below-minimum values.
+bool ParseIntArg(const char* arg, int min_value, int& out) {
+    try {
+        std::size_t pos = 0;
+        const int value = std::stoi(arg, &pos);
+        if (pos != std::string(arg).size() || value < min_value) return false;
+        out = value;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+}  // namespace
+
+// usage: greeter_failover_client [count] [delay_ms]
+//   count    number of sequential calls, >= 1 (default 1)
+//   delay_ms sleep between calls in milliseconds, >= 0 (default 0)
+// One FailoverClient serves all calls, so round-robin rotation and cooldown
+// recovery are observable across the run. Exit 0 iff every call succeeded.
 int main(int argc, char** argv) {
+    int count = 1;
+    int delay_ms = 0;
+    if ((argc > 1 && !ParseIntArg(argv[1], 1, count)) ||
+        (argc > 2 && !ParseIntArg(argv[2], 0, delay_ms)) || argc > 3) {
+        std::cerr << "usage: " << argv[0] << " [count] [delay_ms]" << std::endl;
+        return 2;
+    }
+
+    // Call results go to stdout (a stable interface the live test script
+    // asserts on); route the lb library's spdlog diagnostics to stderr.
+    spdlog::set_default_logger(spdlog::stderr_color_mt("lb_client"));
+
     lb::FailoverClient<Greeter> client =
         lb::FailoverClient<Greeter>::FromEnv();
 
-    HelloRequest request;
-    request.set_name("賴柔瑤");
-    HelloReply reply;
+    bool all_ok = true;
+    for (int i = 0; i < count; ++i) {
+        if (i > 0 && delay_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+        }
 
-    const lb::CallResult result =
-        client.Call(request, reply, &Greeter::Stub::SayHello);
+        HelloRequest request;
+        request.set_name("賴柔瑤");
+        HelloReply reply;
 
-    if (result.status.ok()) {
-        std::cout << "Greeter received: " << reply.message()
-                  << " (via " << result.served_by << ")" << std::endl;
-        return 0;
+        const lb::CallResult result =
+            client.Call(request, reply, &Greeter::Stub::SayHello);
+
+        if (result.status.ok()) {
+            std::cout << "Greeter received: " << reply.message()
+                      << " (via " << result.served_by << ")" << std::endl;
+        } else {
+            std::cout << result.status.error_code() << ": "
+                      << result.status.error_message() << std::endl;
+            all_ok = false;
+        }
     }
-    std::cout << result.status.error_code() << ": "
-              << result.status.error_message() << std::endl;
-    return 1;
+    return all_ok ? 0 : 1;
 }

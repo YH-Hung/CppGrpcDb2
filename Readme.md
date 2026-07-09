@@ -406,3 +406,39 @@ if (result.status.ok()) {
 low-level pieces (`EndpointManager`, `CallWithFailover`, `channel_factory`)
 remain available for advanced use cases. See
 `doc/client-grpc-failover-lb-design.md` for the full design.
+
+### Live testing with MockServer + Envoy (docker compose)
+
+`tests/lb/mockserver/run_live_test.sh` drives the real
+`greeter_failover_client` binary against real containers:
+
+| Host port | What |
+|---|---|
+| 50051–50053 | three MockServer 7.x instances mocking `Greeter/SayHello`, each replying with its own identity (`Hello from mock1 @50051`, ...) |
+| 50050 | Envoy round-robin proxy over the three mocks — the "one endpoint, many backends" shape |
+| 9901 (localhost only) | Envoy admin, readiness checks |
+
+```bash
+cmake --build build --target greeter_failover_client
+tests/lb/mockserver/run_live_test.sh          # --keep leaves the stack up
+```
+
+Requires docker compose, `protoc`, and `python3`. Six scenarios: direct
+round-robin; failover around a stopped container; cooldown rejoin after
+restart; proxy round-robin behind a single endpoint (the app-level loop makes
+one attempt — distribution happens in Envoy); built-in service-config retry
+recovering a dead backend behind the proxy; all-endpoints-down returning
+`UNAVAILABLE`.
+
+The demo client accepts optional `[count] [delay_ms]` args to make several
+sequential calls from one process (`./build/greeter_failover_client 6 0`).
+Round-robin and cooldown state are per-process, so multi-call runs are needed
+to observe rotation and rejoin. Call results go to stdout; lb diagnostics go
+to stderr.
+
+MockServer quirk (7.4.0): it decodes gRPC requests via the proto descriptor
+but does not re-encode JSON response bodies to protobuf, and only emits gRPC
+trailers when an expectation defines them explicitly. `generate_artifacts.sh`
+therefore pre-encodes each reply as gRPC wire bytes (BINARY base64 body +
+`grpc-status` trailer) into the gitignored `gen/` directory — run it before
+using `docker compose up` manually.

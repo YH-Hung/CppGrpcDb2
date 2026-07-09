@@ -1,0 +1,47 @@
+name: lb-mockserver-live
+
+services:
+  mock1:
+    image: mockserver/mockserver:7.4.0
+    environment:
+      MOCKSERVER_GRPC_DESCRIPTOR_DIRECTORY: /descriptors
+      MOCKSERVER_INITIALIZATION_JSON_PATH: /expectations/init.json
+    volumes:
+      - ./gen:/descriptors:ro
+      - ./gen/expectations/mock1.json:/expectations/init.json:ro
+    ports:
+      - "50051:1080"
+
+  mock2:
+    image: mockserver/mockserver:7.4.0
+    environment:
+      MOCKSERVER_GRPC_DESCRIPTOR_DIRECTORY: /descriptors
+      MOCKSERVER_INITIALIZATION_JSON_PATH: /expectations/init.json
+    volumes:
+      - ./gen:/descriptors:ro
+      - ./gen/expectations/mock2.json:/expectations/init.json:ro
+    ports:
+      - "50052:1080"
+
+  mock3:
+    image: mockserver/mockserver:7.4.0
+    environment:
+      MOCKSERVER_GRPC_DESCRIPTOR_DIRECTORY: /descriptors
+      MOCKSERVER_INITIALIZATION_JSON_PATH: /expectations/init.json
+    volumes:
+      - ./gen:/descriptors:ro
+      - ./gen/expectations/mock3.json:/expectations/init.json:ro
+    ports:
+      - "50053:1080"
+
+  envoy:
+    image: envoyproxy/envoy:v1.31-latest
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "50050:50050"
+      - "127.0.0.1:9901:9901"
+    depends_on:
+      - mock1
+      - mock2
+      - mock3
