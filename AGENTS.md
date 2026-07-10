@@ -4,14 +4,14 @@ Canonical guidance for coding agents working in this repository.
 
 ## Project Overview
 
-CppGrpcDb2 is a C++20 CMake project built around gRPC/protobuf services, DB2 CLI integration, interceptors, async CallData handlers, Prometheus metrics, and focused GTest coverage.
+CppGrpcDb2 is a C++20 CMake project built around gRPC/protobuf services, Db2 access via the Halcyon C++ client, interceptors, async CallData handlers, Prometheus metrics, and focused GTest coverage.
 
 Important paths:
 
 - `CMakeLists.txt`: top-level build, generated protobuf targets, executable targets, and tests.
 - `cmake/`: dependency resolution and helper functions.
 - `protos/`: source `.proto` files. Generated `.pb.*` and `.grpc.pb.*` files belong in the CMake build tree, not source control.
-- `src/`: application, library, interceptor, metrics, worker, utility, and DB2 implementation code.
+- `src/`: application, library, interceptor, metrics, worker, utility, and Db2 access (`src/greeting/`, the Halcyon-backed `GreetingStore`) code.
 - `src/call_data/`: async server CallData hierarchy used by `complex_proto_async`.
 - `src/metrics/`: Prometheus helper implementations such as CallData and CQ worker metrics.
 - `include/`: public headers for shared components.
@@ -34,13 +34,25 @@ Build a focused target when iterating:
 cmake --build build --target complex_proto_async cq_worker_metrics_tests
 ```
 
-If the DB2 CLI driver is not in `third_party/clidriver`, configure with:
+Db2 access goes through the Halcyon client, resolved by `cmake/halcyon.cmake` via
+`find_package(Halcyon REQUIRED)` (install Halcyon under `$HOME/.local`). Halcyon
+transitively imports `DB2::CLI`; its bundled `FindDB2CLI.cmake` defaults
+`DB2_CLIDRIVER_ROOT` to `third_party/clidriver`, so the vendored driver resolves
+with no extra flags. To point at a driver elsewhere, configure with
+`-DDB2_CLIDRIVER_ROOT=/path/to/clidriver`.
+
+**macOS one-time driver setup (Apple Silicon).** Halcyon-linked binaries load the
+vendored `libdb2.dylib`. Two one-time steps are required or the binary is SIGKILLed
+at load with no output:
 
 ```bash
-cmake -S . -B build -DDB2_CLI_INSTALL_PREFIX=/path/to/db2_cli_parent
+# 1. Clear the download quarantine on the vendored driver.
+chmod -R u+w third_party/clidriver
+xattr -r -d com.apple.quarantine third_party/clidriver
+# 2. Re-sign libdb2: CMake rewrites its install name to @rpath, which invalidates
+#    the ad-hoc signature, and arm64 macOS kills processes loading invalid sigs.
+codesign --force --sign - third_party/clidriver/lib/libdb2.dylib
 ```
-
-The DB2 CMake module expects the actual driver under `${DB2_CLI_INSTALL_PREFIX}/clidriver`.
 
 ## Test Commands
 
@@ -57,21 +69,46 @@ Run focused tests with:
 ctest --test-dir build --output-on-failure -R cq_worker_metrics_tests
 ```
 
-DB2 wrapper tests are opt-in and require a DB2 CLI runtime plus `DB2_CONN_STR`:
+Db2 integration tests (`greeting_store_tests`) are opt-in via `-DBUILD_DB2_TESTS=ON`.
+Their live cases run only when `DB2_CONN_STR` is set, and skip otherwise. Bring up a
+local Db2 with docker:
 
 ```bash
+docker run -d \
+  --name db2 \
+  --privileged \
+  -e LICENSE=accept \
+  -e DB2INST1_PASSWORD=halcyon \
+  -e DBNAME=SAMPLE \
+  -e PERSISTENT_HOME=false \
+  -p 50000:50000 \
+  --health-cmd="su - db2inst1 -c 'db2 connect to SAMPLE' || exit 1" \
+  --health-interval=20s \
+  --health-timeout=10s \
+  --health-retries=30 \
+  icr.io/db2_community/db2:11.5.9.0
+
+docker ps   # wait for STATUS = healthy (~2 min+)
+
 cmake -S . -B build -DBUILD_DB2_TESTS=ON
-DB2_CONN_STR='DATABASE=db;HOSTNAME=host;PORT=50000;PROTOCOL=TCPIP;UID=user;PWD=pass' ctest --test-dir build --output-on-failure
+export DB2_CONN_STR='DATABASE=SAMPLE;HOSTNAME=localhost;PORT=50000;UID=db2inst1;PWD=halcyon;'
+ctest --test-dir build --output-on-failure -R greeting_store_tests
+
+docker stop db2 && docker rm db2
 ```
 
-Do not enable or rely on DB2 integration tests unless the environment has the DB2 driver and a valid connection string.
+The `greeter_server` and `greeter_callback_server` binaries also read `DB2_CONN_STR`
+at startup: when set they personalize the greeting from a `greetings` table
+(`alice`→`Bonjour`, `bob`→`Hola`, `yuki`→`Konnichiwa`), otherwise they fall back to
+"Hello". The Db2 community image is amd64-only, so on Apple Silicon it runs under
+Docker's emulation and can take several minutes to become healthy.
 
 ## Dependencies
 
 The project expects these dependencies to be available to CMake:
 
 - gRPC and protobuf
-- DB2 CLI driver
+- Halcyon C++ Db2 client (installed under `$HOME/.local`; brings the DB2 CLI driver transitively)
 - spdlog
 - jsoncpp
 - prometheus-cpp with pull support

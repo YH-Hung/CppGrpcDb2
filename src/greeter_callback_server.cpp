@@ -16,9 +16,6 @@
 #include "absl/flags/parse.h"
 #include "absl/strings/str_format.h"
 
-#include "db2/db2.hpp"
-#include "resource/resource_pool.hpp"
-
 #ifdef BAZEL_BUILD
 #include "examples/protos/helloworld.grpc.pb.h"
 #else
@@ -30,6 +27,8 @@
 #include "string_transform_interceptor.h"
 #include "metrics_interceptor.h"
 #include "otel_tracing.h"
+#include "greeting/greeting_store.hpp"
+#include <optional>
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -52,10 +51,8 @@ static inline void ForceLinkHealthProtoDescriptors() {
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::CallbackService {
  public:
-  using Db2Pool = resource::ResourcePool<db2::Connection>;
-
-  explicit GreeterServiceImpl(std::shared_ptr<Db2Pool> pool)
-      : pool_(std::move(pool)) {}
+  explicit GreeterServiceImpl(std::optional<greeting::GreetingStore> store)
+      : store_(std::move(store)) {}
 
   ServerUnaryReactor* SayHello(CallbackServerContext* context,
                                const HelloRequest* request,
@@ -71,30 +68,17 @@ class GreeterServiceImpl final : public Greeter::CallbackService {
       return reactor;
     }
 
-    // Acquire a DB2 Connection from the shared pool just for demonstration
-    // It will be returned to the pool automatically when it goes out of scope.
-    std::shared_ptr<db2::Connection> conn;
-    if (pool_) {
-      try {
-        conn = pool_->acquire();
-        spdlog::info("[trace_id: {}] Acquired DB2 resource from pool. in_use={}, idle={}",
-                     trace_id, pool_->in_use(), pool_->idle_size());
-        // Demonstration only: no actual DB operations are performed.
-      } catch (const std::exception& e) {
-        spdlog::error("[trace_id: {}] Failed to acquire DB2 resource: {}", trace_id, e.what());
-      }
-    } else {
-      spdlog::warn("[trace_id: {}] DB2 pool not available; proceeding without DB resource.", trace_id);
-    }
-
-    std::string prefix("Hello ");
-    reply->set_message(prefix + request->name());
+    // Personalize the salutation from Db2 when a store is configured,
+    // otherwise fall back to the default "Hello".
+    std::string salutation =
+        store_ ? store_->GreetingFor(request->name()) : "Hello";
+    reply->set_message(salutation + " " + request->name());
 
     reactor->Finish(Status::OK);
     return reactor;
   }
  private:
-  std::shared_ptr<Db2Pool> pool_;
+  std::optional<greeting::GreetingStore> store_;
 };
 
 void RunServer(uint16_t port) {
@@ -125,19 +109,11 @@ void RunServer(uint16_t port) {
     return "[TRANSFORMED] " + input;
   });
 
-  // Create a shared resource pool of db2::Connection objects.
-  // This demonstrates pooling only; no actual DB connection is performed.
-  using Db2Pool = resource::ResourcePool<db2::Connection>;
-  auto db2_pool = Db2Pool::create(
-      /*max_size=*/8,
-      []() {
-        // Construct a Connection object; do NOT call connect_* in this demo.
-        return std::make_unique<db2::Connection>();
-      }
-      // No validator provided to avoid requiring a real DB connection.
-  );
-
-  GreeterServiceImpl service(db2_pool);
+  // Open the Db2-backed greeting store from DB2_CONN_STR (graceful when unset).
+  // Halcyon owns its own connection pool, reconnect, and retry internally.
+  auto store = greeting::GreetingStore::OpenFromEnv();
+  if (store) store->EnsureSchema();
+  GreeterServiceImpl service(std::move(store));
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();

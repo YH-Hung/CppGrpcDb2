@@ -10,8 +10,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Dependency Resolution
 # ==============================================================================
 
-# Resolve DB2 CLI Driver
-include(cmake/db2.cmake)
+# Resolve the Halcyon Db2 client (brings DB2::CLI transitively)
+include(cmake/halcyon.cmake)
 
 # Resolve OpenTelemetry C++ library first so its protobuf/gRPC dependency
 # family can be selected before gRPC/protobuf targets are imported.
@@ -223,24 +223,23 @@ target_link_libraries(grpc_client_lb
 target_compile_features(grpc_client_lb PUBLIC cxx_std_20)
 
 # ==============================================================================
-# DB2 Wrapper Library
+# Greeting store (Db2 access via Halcyon)
 # ==============================================================================
 
-add_library(db2_wrapper
-    src/db2/db2.cpp
-        src/util/sql_util.cpp
-        src/util/sql_util.h
+add_library(greeting_store
+    src/greeting/greeting_store.cpp
 )
 
-target_include_directories(db2_wrapper
+target_include_directories(greeting_store
     PUBLIC ${PROJECT_SOURCE_DIR}/include
 )
 
-target_link_libraries(db2_wrapper
-    PUBLIC DB2::db2
+target_link_libraries(greeting_store
+    PUBLIC halcyon::halcyon
+    PUBLIC ${SPDLOG_TARGET}
 )
 
-target_compile_features(db2_wrapper PUBLIC cxx_std_20)
+target_compile_features(greeting_store PUBLIC cxx_std_20)
 
 # ==============================================================================
 # Main Executable Targets
@@ -260,8 +259,10 @@ foreach(target_name ${GRPC_TARGETS})
     # Create the base gRPC executable
     create_grpc_executable(${target_name} "src/${target_name}.cpp")
 
-    # Add DB2 support to all targets
-    add_db2_support(${target_name})
+    # Add Db2 access (Halcyon-backed) only to the server binaries that query.
+    if(target_name STREQUAL "greeter_server" OR target_name STREQUAL "greeter_callback_server")
+        add_db2_support(${target_name})
+    endif()
 
     # Add tracing support to all gRPC binaries
     add_tracing_support(${target_name})
@@ -499,26 +500,26 @@ target_link_libraries(otel_tracing_tests
 add_test(NAME otel_tracing_tests COMMAND otel_tracing_tests)
 target_compile_features(otel_tracing_tests PRIVATE cxx_std_20)
 
-# DB2 wrapper integration tests (opt-in, require DB2 client runtime to be present)
-option(BUILD_DB2_TESTS "Build DB2 wrapper integration tests" OFF)
+# Db2 integration tests (opt-in; the live cases require DB2_CONN_STR + a reachable Db2)
+option(BUILD_DB2_TESTS "Build Db2 integration tests (GreetingStore)" OFF)
 if(BUILD_DB2_TESTS)
-    add_executable(db2_wrapper_tests
-        tests/db2/test_db2_wrapper.cpp
+    add_executable(greeting_store_tests
+        tests/greeting/test_greeting_store.cpp
     )
 
-    target_include_directories(db2_wrapper_tests
+    target_include_directories(greeting_store_tests
         PRIVATE ${PROJECT_SOURCE_DIR}/include
     )
 
-    target_link_libraries(db2_wrapper_tests
+    target_link_libraries(greeting_store_tests
         PRIVATE GTest::gtest
         PRIVATE GTest::gtest_main
-        PRIVATE db2_wrapper
+        PRIVATE greeting_store
     )
 
-    add_test(NAME db2_wrapper_tests COMMAND db2_wrapper_tests)
+    add_test(NAME greeting_store_tests COMMAND greeting_store_tests)
 
-    target_compile_features(db2_wrapper_tests PRIVATE cxx_std_20)
+    target_compile_features(greeting_store_tests PRIVATE cxx_std_20)
 
     # Resource pool refactoring tests
     add_executable(resource_handle_refactor_tests

@@ -28,11 +28,60 @@ brew install grpc protobuf
 
 Or like linux, build and install from source.
 
-### DB2 Driver
+### Halcyon Db2 client + DB2 CLI driver
 
-- Download DB2 CLI driver from https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/
-- Extract and put clidriver folder under third_party/
-- Env: DYLD_LIBRARY_PATH=$HOME/clidriver/lib:$DYLD_LIBRARY_PATH
+Db2 access goes through the [Halcyon](https://github.com/) C++ Db2 client. Install it
+under `$HOME/.local` so `find_package(Halcyon)` resolves it; CMake then imports the
+DB2 CLI driver transitively (no need to set `DYLD_LIBRARY_PATH` — Halcyon bakes the
+driver's lib dir into the RPATH).
+
+- Download the DB2 CLI driver from https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/
+- Extract and put the `clidriver` folder under `third_party/` (the default
+  `DB2_CLIDRIVER_ROOT`).
+
+**macOS one-time driver setup (Apple Silicon).** Any Halcyon-linked binary loads the
+vendored `libdb2.dylib`; without these two steps it is SIGKILLed at load with no
+output:
+
+```bash
+# Clear the download quarantine.
+chmod -R u+w third_party/clidriver
+xattr -r -d com.apple.quarantine third_party/clidriver
+# Re-sign libdb2 (CMake rewrites its install name to @rpath, invalidating the
+# ad-hoc signature; arm64 macOS kills processes that load invalid signatures).
+codesign --force --sign - third_party/clidriver/lib/libdb2.dylib
+```
+
+### Running a Db2 query
+
+The `greeter_server` and `greeter_callback_server` binaries personalize the greeting
+from a `greetings` table when `DB2_CONN_STR` is set, and fall back to "Hello"
+otherwise. Bring up a local Db2 and point the server at it:
+
+```bash
+docker run -d \
+  --name db2 \
+  --privileged \
+  -e LICENSE=accept \
+  -e DB2INST1_PASSWORD=halcyon \
+  -e DBNAME=SAMPLE \
+  -e PERSISTENT_HOME=false \
+  -p 50000:50000 \
+  --health-cmd="su - db2inst1 -c 'db2 connect to SAMPLE' || exit 1" \
+  --health-interval=20s \
+  --health-timeout=10s \
+  --health-retries=30 \
+  icr.io/db2_community/db2:11.5.9.0
+
+docker ps   # wait for STATUS = healthy (~2 min+)
+export DB2_CONN_STR='DATABASE=SAMPLE;HOSTNAME=localhost;PORT=50000;UID=db2inst1;PWD=halcyon;'
+./build/greeter_server &
+grpcurl -plaintext -d '{"name":"alice"}' localhost:50051 helloworld.Greeter/SayHello
+# => { "message": "Bonjour alice" }
+
+# To stop and remove the container when done:
+docker stop db2 && docker rm db2
+```
 
 ### OpenTelemetry Client
 

@@ -22,11 +22,10 @@ function(create_grpc_executable target_name source_file)
     target_compile_features(${target_name} PRIVATE cxx_std_20)
 endfunction()
 
-# Function to add DB2 support to a target
+# Function to add Db2 access (via the Halcyon-backed GreetingStore) to a target.
 function(add_db2_support target_name)
-    # Link against our DB2 wrapper (which itself links DB2::db2)
     target_link_libraries(${target_name}
-        PRIVATE db2_wrapper
+        PRIVATE greeting_store
     )
 endfunction()
 

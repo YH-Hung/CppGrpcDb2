@@ -21,13 +21,17 @@ Run a single test binary directly (faster than ctest) — each GTest target is a
 ./build/test_sql_util
 ```
 
-DB2 integration tests are gated by `-DBUILD_DB2_TESTS=ON` and require `DB2_CONN_STR` plus a working DB2 CLI runtime (driver under `third_party/clidriver` or `-DDB2_CLI_INSTALL_PREFIX=...`). Do not enable them without a real DB.
+Db2 integration tests (`greeting_store_tests`) are gated by `-DBUILD_DB2_TESTS=ON`. The live cases run only when `DB2_CONN_STR` is set; otherwise they skip. A local Db2 is available via `docker run -d --name db2 --privileged -e LICENSE=accept -e DB2INST1_PASSWORD=halcyon -e DBNAME=SAMPLE -e PERSISTENT_HOME=false -p 50000:50000 --health-cmd="su - db2inst1 -c 'db2 connect to SAMPLE' || exit 1" --health-interval=20s --health-timeout=10s --health-retries=30 icr.io/db2_community/db2:11.5.9.0` (DSN: `DATABASE=SAMPLE;HOSTNAME=localhost;PORT=50000;UID=db2inst1;PWD=halcyon;`).
+
+**macOS one-time driver setup.** The vendored `third_party/clidriver` is consumed by the Halcyon client. Two one-time steps are needed on Apple Silicon, or any Halcyon-linked binary is SIGKILLed at load:
+- Clear quarantine: `chmod -R u+w third_party/clidriver && xattr -r -d com.apple.quarantine third_party/clidriver`
+- Re-sign libdb2 (CMake rewrites its install name to `@rpath`, invalidating the ad-hoc signature): `codesign --force --sign - third_party/clidriver/lib/libdb2.dylib`
 
 CLion's `cmake-build-debug/` is also used; both build dirs coexist.
 
 ## Architecture
 
-This is a C++20 gRPC/protobuf playground demonstrating several server styles backed by DB2 CLI, with cross-cutting interceptors and Prometheus metrics. The codebase is organized by concern, not by feature:
+This is a C++20 gRPC/protobuf playground demonstrating several server styles backed by Db2 (via the Halcyon client), with cross-cutting interceptors and Prometheus metrics. The codebase is organized by concern, not by feature:
 
 - **`protos/`** → `.proto` sources. CMake auto-globs them and generates `<name>_proto` libraries into `${build}/gen_proto/`. Adding a `.proto` requires no CMake edits, but generated `.pb.*` files must never be checked in.
 - **`src/<server>.cpp`** → multiple top-level server/client binaries demonstrating different gRPC patterns:
@@ -36,7 +40,7 @@ This is a C++20 gRPC/protobuf playground demonstrating several server styles bac
   - `complex_proto_async` — async single-completion-queue server using `src/call_data/CallData` hierarchy
 - **`src/interceptor/`** → three independent `grpc::experimental::Interceptor` libraries (`string_transform_interceptor`, `metrics_interceptor`, `message_logging_interceptor`). They are mixed into servers via `add_interceptor_support()` in `cmake/common.cmake`.
 - **`src/metrics/`** + **`include/{calldata_metrics,cq_worker_metrics}.h`** → Prometheus instrumentation. `metrics_interceptor` covers sync/callback servers; `calldata_metrics` + `cq_worker_metrics` cover the async CallData/CQ-worker path used by `complex_proto_async`.
-- **`src/db2/` + `include/db2/db2.hpp`** → thin RAII wrapper over DB2 CLI handles. The `db2_wrapper` static lib is linked into servers via `add_db2_support()`.
+- **`src/greeting/` + `include/greeting/greeting_store.hpp`** → `GreetingStore`, the only unit that talks to Db2. It wraps a pooled `halcyon::Database` (from the [Halcyon](https://github.com/) C++ Db2 client, found via `find_package(Halcyon)`) and exposes `OpenFromEnv` / `EnsureSchema` / `GreetingFor`. The `greeting_store` static lib is linked into the two servers via `add_db2_support()`. `greeter_server` and `greeter_callback_server` use it to personalize the salutation from a `greetings` table, falling back to "Hello" when `DB2_CONN_STR` is unset.
 - **`src/worker/WorkerPool.h`** + **`src/resource/resource_pool.hpp`** → header-only utilities. `src/` is on the include path globally, so they're included by relative path from anywhere.
 - **`src/util/`** → `sql_util`, `string_util` etc. These are deliberately built into each test target from sources (not a shared lib) so tests stay narrow.
 - **`src/lb/` (`grpc_client_lb`)** → client-side failover LB across multiple FQDN endpoints (`GRPC_TARGET_ENDPOINTS`); see `doc/client-grpc-failover-lb-design.md`. Demo: `greeter_failover_client`.
@@ -46,7 +50,7 @@ This is a C++20 gRPC/protobuf playground demonstrating several server styles bac
 
 - All targets pin `cxx_std_20`. Don't drop to lower.
 - `cmake/common.cmake` provides `create_grpc_executable`, `add_db2_support`, `add_interceptor_support`, `create_test_executable` — prefer these over hand-rolling new targets.
-- Dependency resolution is split per-package under `cmake/*.cmake` (db2, grpc, spdlog, jsoncpp, prometheus, utf8ansi, gtest). Add new deps in the same pattern.
+- Dependency resolution is split per-package under `cmake/*.cmake` (halcyon, grpc, spdlog, jsoncpp, prometheus, utf8ansi, gtest). `cmake/halcyon.cmake` does `find_package(Halcyon)`, which transitively imports `DB2::CLI` (the vendored `third_party/clidriver`). Add new deps in the same pattern.
 - Headers shared across targets go under `include/`. Implementation-only headers stay next to their `.cpp` under `src/`.
 
 ### Metrics topology
