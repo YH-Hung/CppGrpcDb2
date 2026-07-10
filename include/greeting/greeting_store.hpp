@@ -11,6 +11,10 @@ namespace halcyon { class Database; }
 
 namespace greeting {
 
+namespace testing {
+class GreetingStoreTestPeer;
+}
+
 // Wraps a pooled halcyon::Database and exposes a tiny, request-friendly API.
 // Construct only via OpenFromEnv(), so a returned store is always usable.
 class GreetingStore {
@@ -34,6 +38,7 @@ class GreetingStore {
   std::string GreetingFor(std::string_view name);
 
  private:
+  friend class testing::GreetingStoreTestPeer;
   explicit GreetingStore(std::unique_ptr<halcyon::Database> db);
   std::unique_ptr<halcyon::Database> db_;
 };

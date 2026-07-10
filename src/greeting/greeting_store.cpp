@@ -72,8 +72,21 @@ std::string GreetingStore::GreetingFor(std::string_view name) {
                   rs.error().message);
     return kDefaultSalutation;
   }
-  for (auto& row : rs.value()) {
-    return std::get<0>(row.as<std::string>());
+
+  auto& result = rs.value();
+  for (auto& row : result) {
+    auto salutation = row.try_as<std::string>();
+    if (!salutation.ok()) {
+      spdlog::error("greeting row mapping failed for '{}': {}", name,
+                    salutation.error().message);
+      return kDefaultSalutation;
+    }
+    return std::get<0>(std::move(salutation.value()));
+  }
+
+  if (!result.ok()) {
+    spdlog::error("greeting result fetch failed for '{}': {}", name,
+                  result.error()->message);
   }
   return kDefaultSalutation;
 }
