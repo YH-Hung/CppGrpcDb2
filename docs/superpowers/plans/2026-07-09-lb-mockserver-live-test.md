@@ -49,7 +49,7 @@ The round-robin cursor is in-process state starting at endpoint 0, so a fresh pr
 **Files:**
 - Modify: `src/greeter_failover_client.cpp` (whole file, currently 33 lines)
 
-- [ ] **Step 1: Replace the file with the extended version**
+- [x] **Step 1: Replace the file with the extended version**
 
 Write `src/greeter_failover_client.cpp` with exactly this content:
 
@@ -130,12 +130,12 @@ int main(int argc, char** argv) {
 }
 ```
 
-- [ ] **Step 2: Build the target**
+- [x] **Step 2: Build the target**
 
 Run: `cmake --build build --target greeter_failover_client`
 Expected: compiles and links with no warnings introduced by this change.
 
-- [ ] **Step 3: Verify arg validation (no server needed)**
+- [x] **Step 3: Verify arg validation (no server needed)**
 
 Run: `./build/greeter_failover_client abc; echo "rc=$?"`
 Expected: `usage: ./build/greeter_failover_client [count] [delay_ms]` on stderr, `rc=2`.
@@ -146,7 +146,7 @@ Expected: usage line, `rc=2` (count must be >= 1).
 Run: `./build/greeter_failover_client 1 2 3; echo "rc=$?"`
 Expected: usage line, `rc=2` (too many args).
 
-- [ ] **Step 4: Verify default and multi-call behavior against no server**
+- [x] **Step 4: Verify default and multi-call behavior against no server**
 
 Run: `GRPC_TARGET_ENDPOINTS="127.0.0.1:59999" ./build/greeter_failover_client; echo "rc=$?"`
 Expected: exactly one line starting with `14:` (UNAVAILABLE — nothing listens on 59999), `rc=1`. This confirms the no-arg path still makes exactly one call.
@@ -154,12 +154,12 @@ Expected: exactly one line starting with `14:` (UNAVAILABLE — nothing listens 
 Run: `GRPC_TARGET_ENDPOINTS="127.0.0.1:59999" ./build/greeter_failover_client 3; echo "rc=$?"`
 Expected: exactly three lines starting with `14:`, `rc=1`.
 
-- [ ] **Step 5: Run the existing lb test suite (regression guard)**
+- [x] **Step 5: Run the existing lb test suite (regression guard)**
 
 Run: `ctest --test-dir build --output-on-failure -R "lb_"`
 Expected: all lb tests pass (the client binary isn't under test, but this confirms the build is coherent).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/greeter_failover_client.cpp
@@ -180,7 +180,7 @@ This task retires the spec's main external risk early: the MockServer 7.4.0 gRPC
 - Create: `tests/lb/mockserver/expectations/mock3.json`
 - Create: `tests/lb/mockserver/docker-compose.yml`
 
-- [ ] **Step 1: Create the three expectation files**
+- [x] **Step 1: Create the three expectation files**
 
 `tests/lb/mockserver/expectations/mock1.json`:
 
@@ -238,7 +238,7 @@ This task retires the spec's main external risk early: the MockServer 7.4.0 gRPC
 
 No body matcher on the request: any `HelloRequest.name` (including the client's default non-ASCII name) matches. The message text is a **test interface** — Task 4's script asserts on `Hello from mockN @5005N` verbatim.
 
-- [ ] **Step 2: Create `tests/lb/mockserver/docker-compose.yml`**
+- [x] **Step 2: Create `tests/lb/mockserver/docker-compose.yml`**
 
 The `envoy` service is included now but only validated in Task 3. `gen/` is populated at runtime by `protoc` (Step 3) and gitignored in Task 5.
 
@@ -292,7 +292,7 @@ services:
       - mock3
 ```
 
-- [ ] **Step 3: Generate the descriptor set**
+- [x] **Step 3: Generate the descriptor set**
 
 ```bash
 mkdir -p tests/lb/mockserver/gen
@@ -302,7 +302,7 @@ protoc --descriptor_set_out=tests/lb/mockserver/gen/helloworld.dsc \
 
 Expected: `tests/lb/mockserver/gen/helloworld.dsc` exists and is non-empty (`ls -l` shows a few hundred bytes).
 
-- [ ] **Step 4: Start mock1 only and wait for readiness**
+- [x] **Step 4: Start mock1 only and wait for readiness**
 
 Note: `envoy.yaml` doesn't exist yet, so start only `mock1` (compose validates mounts lazily per service):
 
@@ -316,7 +316,7 @@ done
 
 Expected: `READY` within ~15 s (first run adds image pull time).
 
-- [ ] **Step 5: Validate the gRPC expectation with the real client**
+- [x] **Step 5: Validate the gRPC expectation with the real client**
 
 ```bash
 GRPC_TARGET_ENDPOINTS="127.0.0.1:50051" ./build/greeter_failover_client; echo "rc=$?"
@@ -334,7 +334,7 @@ If this fails, debug before proceeding — the whole design hangs on this format
 - `curl -s -X PUT "http://127.0.0.1:50051/mockserver/retrieve?type=active_expectations"` — confirm the expectation registered.
 - If MockServer rejects the expectation shape, consult https://www.mock-server.com/mock_server/grpc_mocking.html for the 7.4.0 format and adjust all three JSON files identically (keeping the `Hello from mockN @5005N` message text unchanged).
 
-- [ ] **Step 6: Validate mock2 and mock3 the same way**
+- [x] **Step 6: Validate mock2 and mock3 the same way**
 
 ```bash
 docker compose -f tests/lb/mockserver/docker-compose.yml up -d mock2 mock3
@@ -355,7 +355,7 @@ Greeter received: Hello from mock2 @50052 (via 127.0.0.1:50052)
 Greeter received: Hello from mock3 @50053 (via 127.0.0.1:50053)
 ```
 
-- [ ] **Step 7: Sanity-check rotation across all three (preview of scenario 1)**
+- [x] **Step 7: Sanity-check rotation across all three (preview of scenario 1)**
 
 ```bash
 GRPC_TARGET_ENDPOINTS="127.0.0.1:50051,127.0.0.1:50052,127.0.0.1:50053" \
@@ -364,7 +364,7 @@ GRPC_TARGET_ENDPOINTS="127.0.0.1:50051,127.0.0.1:50052,127.0.0.1:50053" \
 
 Expected: six lines rotating mock1 → mock2 → mock3 → mock1 → mock2 → mock3, `rc=0`.
 
-- [ ] **Step 8: Tear down and commit**
+- [x] **Step 8: Tear down and commit**
 
 ```bash
 docker compose -f tests/lb/mockserver/docker-compose.yml down --remove-orphans
@@ -383,7 +383,7 @@ Note: `gen/helloworld.dsc` stays untracked (gitignore lands in Task 5 — until 
 **Files:**
 - Create: `tests/lb/mockserver/envoy.yaml`
 
-- [ ] **Step 1: Create `tests/lb/mockserver/envoy.yaml`**
+- [x] **Step 1: Create `tests/lb/mockserver/envoy.yaml`**
 
 Two deliberate choices, both required by the spec: **no active health checks and no Envoy-side retries** (a stopped backend must surface `UNAVAILABLE` to the client so its channel-level retry does the recovery), and a **5-minute `dns_refresh_rate`** (with `STRICT_DNS`, Docker DNS drops a stopped container's name; a long refresh keeps the dead endpoint in rotation for the duration of a test run instead of Envoy silently routing around it).
 
@@ -445,7 +445,7 @@ static_resources:
                     socket_address: { address: mock3, port_value: 1080 }
 ```
 
-- [ ] **Step 2: Start the full stack and wait for readiness**
+- [x] **Step 2: Start the full stack and wait for readiness**
 
 ```bash
 docker compose -f tests/lb/mockserver/docker-compose.yml up -d
@@ -457,7 +457,7 @@ done
 
 Expected: `ENVOY READY`. If envoy restarts in a loop, check config parse errors with `docker compose -f tests/lb/mockserver/docker-compose.yml logs envoy`.
 
-- [ ] **Step 3: Validate proxy round-robin with the real client**
+- [x] **Step 3: Validate proxy round-robin with the real client**
 
 ```bash
 GRPC_TARGET_ENDPOINTS="127.0.0.1:50050" ./build/greeter_failover_client 3; echo "rc=$?"
@@ -472,7 +472,7 @@ Greeter received: Hello from mock1 @50051 (via 127.0.0.1:50050)
 rc=0
 ```
 
-- [ ] **Step 4: Preview the built-in-retry scenario manually**
+- [x] **Step 4: Preview the built-in-retry scenario manually**
 
 ```bash
 docker compose -f tests/lb/mockserver/docker-compose.yml stop mock2
@@ -482,7 +482,7 @@ docker compose -f tests/lb/mockserver/docker-compose.yml start mock2
 
 Expected: six lines, all `(via 127.0.0.1:50050)`, no line mentioning `mock2`, `rc=0`. This proves the channel's service-config retry (`maxAttempts=4`, retriable on `UNAVAILABLE`, active because a single endpoint means `multi_endpoint=false`) recovers Envoy's failed picks of the dead backend. If instead calls fail with `14:` here, check `docker compose ... logs envoy` for whether Envoy dropped mock2 from DNS (should not, within `dns_refresh_rate: 300s`).
 
-- [ ] **Step 5: Tear down and commit**
+- [x] **Step 5: Tear down and commit**
 
 ```bash
 docker compose -f tests/lb/mockserver/docker-compose.yml down --remove-orphans
@@ -499,7 +499,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `tests/lb/mockserver/run_live_test.sh` (executable)
 
-- [ ] **Step 1: Create the script**
+- [x] **Step 1: Create the script**
 
 Bash 3.2-compatible (macOS default): no `mapfile`, no associative arrays. No `set -e` — client exit codes are assertions, captured explicitly.
 
@@ -720,7 +720,7 @@ log "summary: ${PASSES} passed, ${FAILURES} failed"
 exit 0
 ```
 
-- [ ] **Step 2: Make it executable and lint it**
+- [x] **Step 2: Make it executable and lint it**
 
 ```bash
 chmod +x tests/lb/mockserver/run_live_test.sh
@@ -729,7 +729,7 @@ bash -n tests/lb/mockserver/run_live_test.sh && echo "syntax OK"
 
 Expected: `syntax OK`. If `shellcheck` is installed, run it too and fix genuine findings (style-only findings may be ignored).
 
-- [ ] **Step 3: Run the full suite three times (flakiness check)**
+- [x] **Step 3: Run the full suite three times (flakiness check)**
 
 ```bash
 tests/lb/mockserver/run_live_test.sh; echo "run1 rc=$?"
@@ -741,7 +741,7 @@ Expected each run: six `PASS:` lines, `summary: 6 passed, 0 failed`, `rc=0`.
 
 **If scenario 3 fails intermittently** (see "Known risk" in the header): inspect `tests/lb/mockserver/gen/rejoin.out`. If failures are non-retriable statuses (`4:` DEADLINE_EXCEEDED or an expectation-miss status) during mock1's boot window, apply the approved fallback: in scenario 3, delete the `[ ${BG_RC} -eq 0 ] || OK=0` line, add a comment explaining the restart window can produce non-retriable errors, and update the spec's scenario 3 paragraph to match. Then rerun the 3× check.
 
-- [ ] **Step 4: Verify `--keep` and manual teardown**
+- [x] **Step 4: Verify `--keep` and manual teardown**
 
 ```bash
 tests/lb/mockserver/run_live_test.sh --keep
@@ -751,7 +751,7 @@ docker compose -f tests/lb/mockserver/docker-compose.yml down --remove-orphans
 
 Expected: after `--keep`, `ps` still lists the (partially stopped) stack; `down` removes it.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/lb/mockserver/run_live_test.sh
@@ -768,7 +768,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `.gitignore` (append)
 - Modify: `Readme.md` (append to the `## Client-side failover load balancing` section, which is the last section of the file)
 
-- [ ] **Step 1: Gitignore the runtime-generated descriptor dir**
+- [x] **Step 1: Gitignore the runtime-generated descriptor dir**
 
 Append to `.gitignore`:
 
@@ -779,7 +779,7 @@ tests/lb/mockserver/gen/
 
 Verify: `git status` no longer lists `tests/lb/mockserver/gen/` as untracked.
 
-- [ ] **Step 2: Document the live test in `Readme.md`**
+- [x] **Step 2: Document the live test in `Readme.md`**
 
 Append at the end of the file (still inside the `## Client-side failover load balancing` section):
 
@@ -814,7 +814,7 @@ needed to observe rotation and rejoin.
 
 Note: paste the section content only — the outer ````markdown```` fence above is plan formatting, not part of `Readme.md`.
 
-- [ ] **Step 3: Final end-to-end verification**
+- [x] **Step 3: Final end-to-end verification**
 
 ```bash
 tests/lb/mockserver/run_live_test.sh; echo "rc=$?"
@@ -824,7 +824,7 @@ git status
 
 Expected: live script `6 passed, 0 failed`, `rc=0`; all lb ctest targets pass; `git status` shows only `.gitignore` and `Readme.md` as modified (no stray generated files).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .gitignore Readme.md

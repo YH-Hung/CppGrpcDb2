@@ -32,7 +32,7 @@
 - Create: `cmake/halcyon.cmake`
 - Modify: `CMakeLists.txt` (line 14 region: `include(cmake/db2.cmake)`)
 
-- [ ] **Step 1: Create `cmake/halcyon.cmake`**
+- [x] **Step 1: Create `cmake/halcyon.cmake`**
 
 ```cmake
 # Resolve the Halcyon Db2 client (installed under $HOME/.local).
@@ -44,7 +44,7 @@ find_package(Halcyon REQUIRED)
 message(STATUS "Halcyon found: target halcyon::halcyon")
 ```
 
-- [ ] **Step 2: Swap the include in `CMakeLists.txt`**
+- [x] **Step 2: Swap the include in `CMakeLists.txt`**
 
 Replace:
 ```cmake
@@ -57,7 +57,7 @@ with:
 include(cmake/halcyon.cmake)
 ```
 
-- [ ] **Step 3: Configure to verify Halcyon resolves**
+- [x] **Step 3: Configure to verify Halcyon resolves**
 
 Run:
 ```bash
@@ -65,7 +65,7 @@ cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$HOME/.local -DCMAKE_PREFIX_PATH=$HOM
 ```
 Expected: configure succeeds and prints `Halcyon found: target halcyon::halcyon`. (Build will fail later because `db2_wrapper` sources are still referenced — that is fixed in Task 3.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add cmake/halcyon.cmake CMakeLists.txt
@@ -80,7 +80,7 @@ git commit -m "build: resolve Halcyon Db2 client via find_package"
 - Create: `include/greeting/greeting_store.hpp`
 - Create: `src/greeting/greeting_store.cpp`
 
-- [ ] **Step 1: Write the header `include/greeting/greeting_store.hpp`**
+- [x] **Step 1: Write the header `include/greeting/greeting_store.hpp`**
 
 ```cpp
 // Db2-backed greeting lookup, built on the Halcyon client.
@@ -128,7 +128,7 @@ class GreetingStore {
 
 Note: `halcyon::Database` is held via `unique_ptr` with a forward declaration so the heavy `halcyon/halcyon.hpp` include stays out of the public header (consumers include only `<grpcpp>` etc.).
 
-- [ ] **Step 2: Write the implementation `src/greeting/greeting_store.cpp`**
+- [x] **Step 2: Write the implementation `src/greeting/greeting_store.cpp`**
 
 ```cpp
 #include "greeting/greeting_store.hpp"
@@ -212,7 +212,7 @@ std::string GreetingStore::GreetingFor(std::string_view name) {
 }  // namespace greeting
 ```
 
-- [ ] **Step 3: Add the `greeting_store` target to `CMakeLists.txt`**
+- [x] **Step 3: Add the `greeting_store` target to `CMakeLists.txt`**
 
 Insert after the DB2 wrapper section is removed (see Task 3); for now add this block in the libraries area (after the `otel_tracing` target, before the old DB2 section):
 
@@ -237,7 +237,7 @@ target_link_libraries(greeting_store
 target_compile_features(greeting_store PUBLIC cxx_std_20)
 ```
 
-- [ ] **Step 4: Verify the library compiles (proves Halcyon headers are C++20-clean)**
+- [x] **Step 4: Verify the library compiles (proves Halcyon headers are C++20-clean)**
 
 Run:
 ```bash
@@ -245,7 +245,7 @@ cmake --build build --target greeting_store
 ```
 Expected: `greeting_store` compiles and archives with no errors. This is the early C++20-compatibility check called out in the spec — if Halcyon's headers fail under C++20, it surfaces here.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add include/greeting/greeting_store.hpp src/greeting/greeting_store.cpp CMakeLists.txt
@@ -261,7 +261,7 @@ git commit -m "feat: add Halcyon-backed GreetingStore library"
 - Modify: `CMakeLists.txt` (db2_wrapper section ~203-220; GRPC_TARGETS loop ~227-252)
 - Delete: `cmake/db2.cmake`, `src/db2/db2.cpp`, `include/db2/db2.hpp`
 
-- [ ] **Step 1: Repoint `add_db2_support` in `cmake/common.cmake`**
+- [x] **Step 1: Repoint `add_db2_support` in `cmake/common.cmake`**
 
 Replace the function body:
 ```cmake
@@ -283,7 +283,7 @@ function(add_db2_support target_name)
 endfunction()
 ```
 
-- [ ] **Step 2: Delete the `db2_wrapper` target block in `CMakeLists.txt`**
+- [x] **Step 2: Delete the `db2_wrapper` target block in `CMakeLists.txt`**
 
 Remove the entire section:
 ```cmake
@@ -308,7 +308,7 @@ target_link_libraries(db2_wrapper
 target_compile_features(db2_wrapper PUBLIC cxx_std_20)
 ```
 
-- [ ] **Step 3: Apply `add_db2_support` to only the two servers**
+- [x] **Step 3: Apply `add_db2_support` to only the two servers**
 
 In the `GRPC_TARGETS` foreach loop, remove the unconditional `add_db2_support(${target_name})` call and instead guard it:
 ```cmake
@@ -333,13 +333,13 @@ foreach(target_name ${GRPC_TARGETS})
 endforeach()
 ```
 
-- [ ] **Step 4: Delete obsolete files**
+- [x] **Step 4: Delete obsolete files**
 
 ```bash
 git rm cmake/db2.cmake src/db2/db2.cpp include/db2/db2.hpp
 ```
 
-- [ ] **Step 5: Reconfigure (build will still fail until servers are migrated in Tasks 4-5)**
+- [x] **Step 5: Reconfigure (build will still fail until servers are migrated in Tasks 4-5)**
 
 Run:
 ```bash
@@ -347,7 +347,7 @@ cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$HOME/.local -DCMAKE_PREFIX_PATH=$HOM
 ```
 Expected: configure succeeds (no reference to `cmake/db2.cmake` or `db2_wrapper`).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -361,7 +361,7 @@ git commit -m "build: remove db2_wrapper; route Db2 support through greeting_sto
 **Files:**
 - Modify: `src/greeter_server.cpp`
 
-- [ ] **Step 1: Add the include and a store member**
+- [x] **Step 1: Add the include and a store member**
 
 Add near the existing includes (after `#include "otel_tracing.h"`):
 ```cpp
@@ -396,7 +396,7 @@ private:
 };
 ```
 
-- [ ] **Step 2: Open the store in `RunServer` before constructing the service**
+- [x] **Step 2: Open the store in `RunServer` before constructing the service**
 
 Replace `GreeterServiceImpl service;` with:
 ```cpp
@@ -405,7 +405,7 @@ Replace `GreeterServiceImpl service;` with:
     GreeterServiceImpl service(std::move(store));
 ```
 
-- [ ] **Step 3: Build the target**
+- [x] **Step 3: Build the target**
 
 Run:
 ```bash
@@ -413,7 +413,7 @@ cmake --build build --target greeter_server
 ```
 Expected: links successfully against `greeting_store` / `halcyon::halcyon`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/greeter_server.cpp
@@ -427,7 +427,7 @@ git commit -m "feat: greeter_server greets via Db2 GreetingStore lookup"
 **Files:**
 - Modify: `src/greeter_callback_server.cpp`
 
-- [ ] **Step 1: Replace the db2/resource_pool includes**
+- [x] **Step 1: Replace the db2/resource_pool includes**
 
 Remove:
 ```cpp
@@ -440,7 +440,7 @@ Add (near `#include "otel_tracing.h"`):
 #include <optional>
 ```
 
-- [ ] **Step 2: Replace the service impl's pool with a store**
+- [x] **Step 2: Replace the service impl's pool with a store**
 
 Change the class to:
 ```cpp
@@ -475,7 +475,7 @@ class GreeterServiceImpl final : public Greeter::CallbackService {
 };
 ```
 
-- [ ] **Step 3: Replace the pool creation in `RunServer`**
+- [x] **Step 3: Replace the pool creation in `RunServer`**
 
 Remove the `using Db2Pool = ...; auto db2_pool = Db2Pool::create(...);` block and replace the service construction:
 ```cpp
@@ -484,7 +484,7 @@ Remove the `using Db2Pool = ...; auto db2_pool = Db2Pool::create(...);` block an
   GreeterServiceImpl service(std::move(store));
 ```
 
-- [ ] **Step 4: Build the target**
+- [x] **Step 4: Build the target**
 
 Run:
 ```bash
@@ -492,7 +492,7 @@ cmake --build build --target greeter_callback_server
 ```
 Expected: compiles and links (no more `db2::` / `resource::ResourcePool` references).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/greeter_callback_server.cpp
@@ -508,7 +508,7 @@ git commit -m "feat: greeter_callback_server greets via Db2 GreetingStore lookup
 - Create: `tests/greeting/test_greeting_store.cpp`
 - Delete: `tests/db2/test_db2_wrapper.cpp`
 
-- [ ] **Step 1: Write the gated integration test `tests/greeting/test_greeting_store.cpp`**
+- [x] **Step 1: Write the gated integration test `tests/greeting/test_greeting_store.cpp`**
 
 ```cpp
 #include <gtest/gtest.h>
@@ -542,7 +542,7 @@ TEST(GreetingStore, SeededNameReturnsSalutationLive) {
 }
 ```
 
-- [ ] **Step 2: Replace the BUILD_DB2_TESTS block in `CMakeLists.txt`**
+- [x] **Step 2: Replace the BUILD_DB2_TESTS block in `CMakeLists.txt`**
 
 Replace the `db2_wrapper_tests` target (keep `resource_handle_refactor_tests` as-is) with:
 ```cmake
@@ -567,13 +567,13 @@ if(BUILD_DB2_TESTS)
 ```
 (Leave the existing `resource_handle_refactor_tests` block and the closing `endif()` intact.)
 
-- [ ] **Step 3: Delete the old wrapper test**
+- [x] **Step 3: Delete the old wrapper test**
 
 ```bash
 git rm tests/db2/test_db2_wrapper.cpp
 ```
 
-- [ ] **Step 4: Configure + build the test**
+- [x] **Step 4: Configure + build the test**
 
 Run:
 ```bash
@@ -586,7 +586,7 @@ Expected: builds. Without `DB2_CONN_STR`, run it:
 ```
 Expected: `OpenFromEnvIsNulloptWithoutDsn` PASS, live test SKIPPED.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
@@ -599,7 +599,7 @@ git commit -m "test: replace db2_wrapper_tests with gated greeting_store_tests"
 
 **Files:** none (documentation only)
 
-- [ ] **Step 1: Document `docker run` command**
+- [x] **Step 1: Document `docker run` command**
 
 We document the equivalent `docker run` command to start a live Db2 container:
 
@@ -619,7 +619,7 @@ docker run -d \
   icr.io/db2_community/db2:11.5.9.0
 ```
 
-- [ ] **Step 2: Update documentation**
+- [x] **Step 2: Update documentation**
 
 Update `AGENTS.md`, `Readme.md`, and `CLAUDE.md` to document the simple `docker run` commands instead of docker-compose.
 
@@ -630,7 +630,7 @@ Update `AGENTS.md`, `Readme.md`, and `CLAUDE.md` to document the simple `docker 
 **Files:**
 - Modify: `Readme.md`, `AGENTS.md`, `CLAUDE.md`
 
-- [ ] **Step 1: Full build of the whole tree**
+- [x] **Step 1: Full build of the whole tree**
 
 Run:
 ```bash
@@ -638,7 +638,7 @@ cmake --build build
 ```
 Expected: every target builds, including both servers, `greeting_store`, and `greeting_store_tests`.
 
-- [ ] **Step 2: Run the unit test suite**
+- [x] **Step 2: Run the unit test suite**
 
 Run:
 ```bash
@@ -646,7 +646,7 @@ ctest --test-dir build --output-on-failure
 ```
 Expected: all pass; `greeting_store_tests` live case skipped (no DSN).
 
-- [ ] **Step 3: Smoke-run a server with no DB (graceful fallback)**
+- [x] **Step 3: Smoke-run a server with no DB (graceful fallback)**
 
 Run:
 ```bash
@@ -658,14 +658,14 @@ kill $SERVER_PID
 ```
 Expected: a log line warning `DB2_CONN_STR not set` and a reply `{"message": "Hello alice"}`.
 
-- [ ] **Step 4: Update docs**
+- [x] **Step 4: Update docs**
 
 In `CLAUDE.md`, `AGENTS.md`, and `Readme.md`:
 - Replace mentions of `db2_wrapper` / `src/db2/db2.hpp` / `db2::Connection` with: Db2 access is provided by the Halcyon client (`halcyon::halcyon`) behind `greeting::GreetingStore` (`include/greeting/greeting_store.hpp`).
 - Document `DB2_CONN_STR` (DSN format `DATABASE=SAMPLE;HOSTNAME=localhost;PORT=50000;UID=db2inst1;PWD=halcyon;`), and the `docker run` workflow.
 - Update the `BUILD_DB2_TESTS` note to point at `greeting_store_tests`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Readme.md AGENTS.md CLAUDE.md
@@ -678,7 +678,7 @@ git commit -m "docs: document Halcyon adoption, GreetingStore, and Db2 docker wo
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Bring up Db2**
+- [x] **Step 1: Bring up Db2**
 
 ```bash
 docker run -d \
@@ -698,7 +698,7 @@ docker run -d \
 docker ps   # wait for STATUS = healthy (~2 min+)
 ```
 
-- [ ] **Step 2: Run the live integration test**
+- [x] **Step 2: Run the live integration test**
 
 ```bash
 export DB2_CONN_STR="DATABASE=SAMPLE;HOSTNAME=localhost;PORT=50000;UID=db2inst1;PWD=halcyon;"
@@ -706,7 +706,7 @@ export DB2_CONN_STR="DATABASE=SAMPLE;HOSTNAME=localhost;PORT=50000;UID=db2inst1;
 ```
 Expected: `SeededNameReturnsSalutationLive` PASS (not skipped).
 
-- [ ] **Step 3: End-to-end greeting via a server**
+- [x] **Step 3: End-to-end greeting via a server**
 
 ```bash
 ./build/greeter_callback_server &
@@ -717,7 +717,7 @@ kill $SERVER_PID
 ```
 Expected: reply contains `Bonjour` for alice (the callback server's interceptors may also transform the string; the salutation must be Db2-sourced).
 
-- [ ] **Step 4: Tear down**
+- [x] **Step 4: Tear down**
 
 ```bash
 docker stop db2 && docker rm db2

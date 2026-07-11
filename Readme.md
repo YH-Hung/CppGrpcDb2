@@ -30,7 +30,7 @@ Or like linux, build and install from source.
 
 ### Halcyon Db2 client + DB2 CLI driver
 
-Db2 access goes through the [Halcyon](https://github.com/) C++ Db2 client. Install it
+Db2 access goes through the [Halcyon](https://github.com/YH-Hung/Halcyon) C++ Db2 client. Install it
 under `$HOME/.local` so `find_package(Halcyon)` resolves it; CMake then imports the
 DB2 CLI driver transitively (no need to set `DYLD_LIBRARY_PATH` — Halcyon bakes the
 driver's lib dir into the RPATH).
