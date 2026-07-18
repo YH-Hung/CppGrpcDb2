@@ -28,6 +28,7 @@
 #include "metrics_interceptor.h"
 #include "otel_tracing.h"
 #include "greeting/greeting_store.hpp"
+#include "lb/keepalive.h"
 #include <optional>
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
@@ -118,6 +119,9 @@ void RunServer(uint16_t port) {
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
   ServerBuilder builder;
+  // Accept the lb client's keepalive ping rate (default tolerance would
+  // answer it with GOAWAY "too_many_pings").
+  lb::AddKeepaliveServerArgs(builder);
   // Listen on the given address without any authentication mechanism.
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
   // Register "service" as the instance through which we'll communicate with

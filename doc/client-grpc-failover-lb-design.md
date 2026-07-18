@@ -47,6 +47,7 @@ stays header-only, because it must be.
 | `src/lb/endpoint_config.h` / `.cpp` | `Endpoint` struct, `ParseEndpoints()`, `LoadLbConfigFromEnv()` | nothing (pure) |
 | `src/lb/endpoint_manager.h` / `.cpp` | `EndpointManager`: selection + cooldown state machine | nothing (clock injected) |
 | `src/lb/channel_factory.h` / `.cpp` | builds one channel per endpoint with shared `ChannelArguments` | grpcpp, jsoncpp, spdlog |
+| `src/lb/keepalive.h` | both halves of the keepalive contract: client ping constants + `AddKeepaliveServerArgs()` for in-repo servers (header-only) | grpc arg names |
 | `src/lb/failover_call.h` | `CallWithFailover()` function template (header-only by necessity) | grpcpp, `EndpointManager` |
 
 ### 1. Configuration (`endpoint_config`)
@@ -100,13 +101,24 @@ One channel per FQDN, all sharing `ChannelArguments`:
   attempts (retry amplification). In single-endpoint mode `maxAttempts` stays 4.
   `ChannelFactoryOptions` can override `maxAttempts` in single-endpoint mode only
   (multi-endpoint stays pinned to 2) and set `initialBackoff`/`maxBackoff`
-  (defaults 0.1s/1s).
+  (defaults 0.1s/1s). The override is clamped to gRPC's valid range [2, 5]:
+  `maxAttempts < 2` makes the whole service config invalid (laming the channel),
+  and values above 5 are treated as 5 anyway.
 - `grpc.lb_policy_name = round_robin` so a single FQDN resolving to multiple A/AAAA
   records is still balanced by gRPC itself.
-- Keepalive args (`GRPC_ARG_KEEPALIVE_TIME_MS = 10000`,
-  `GRPC_ARG_KEEPALIVE_TIMEOUT_MS = 5000`,
-  `GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS = 1`) so half-dead connections are detected in
-  seconds instead of at the TCP timeout.
+- Keepalive: disabled by default (no `GRPC_ARG_KEEPALIVE_TIME_MS`), matching
+  gRPC's own default. `GRPC_TARGET_ENDPOINTS` may name arbitrary servers whose
+  ping-strike policy we don't control: an unmodified server permits one
+  unsolicited ping per 5 minutes even during an active-but-quiet long-lived
+  RPC, then answers GOAWAY `too_many_pings` — so any client ping interval,
+  including the guide's 1-minute floor, requires server-side coordination.
+  Clients talking to coordinated servers opt in via `ChannelFactoryOptions`
+  (`keepalive_time`, `keepalive_timeout`, `keepalive_permit_without_calls`,
+  which also lifts gRPC's idle-ping throttle) for half-dead detection in
+  seconds. The opt-in ping rate is a two-sided contract (`src/lb/keepalive.h`):
+  every in-repo server an lb client targets applies
+  `lb::AddKeepaliveServerArgs(builder)`
+  (`GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS = 5000`).
 - The factory is injectable (`std::function<std::shared_ptr<Channel>(const Endpoint&,
   const ChannelArguments&)>`) so tests can supply fakes.
 - Credentials: `InsecureChannelCredentials()` in this playground, isolated in the factory
@@ -130,7 +142,15 @@ Per logical call:
 4. On a retriable status → `ReportFailure`, log the failover at `warn`, continue to the
    next endpoint. The retriable set is a `FailoverOptions` field defaulting to
    `{UNAVAILABLE}` — the code produced by connection-refused, endpoint-down, and
-   DNS-resolution failure alike.
+   DNS-resolution failure alike. `DEADLINE_EXCEEDED` is deliberately not
+   retriable by default: the deadline may expire after the server already
+   executed the RPC, so failing over could run a non-idempotent operation
+   twice. It is instead in `cooldown_codes` (returned to the caller un-retried
+   but still counted as an endpoint failure): expiry of the loop's own
+   per-attempt deadline means the endpoint is hung or overloaded — keepalive
+   only catches dead transports, not stuck applications — so cooling it down
+   rotates later calls away. Clients whose RPCs are known idempotent opt
+   deadline expiry into failover via `failover_options().retriable_codes`.
 5. On any other status (`INVALID_ARGUMENT`, `PERMISSION_DENIED`, ...) → return
    immediately. Failing over on application errors would hammer every endpoint with a
    request that can never succeed.

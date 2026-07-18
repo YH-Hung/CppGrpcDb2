@@ -23,6 +23,7 @@
 #include "string_transform_interceptor.h"
 #include "otel_tracing.h"
 #include "utf8ansi.h"
+#include "lb/keepalive.h"
 
 using grpc::CallbackServerContext;
 using grpc::Server;
@@ -144,6 +145,9 @@ void RunServer(uint16_t port) {
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
   ServerBuilder builder;
+  // Accept the lb client's keepalive ping rate (default tolerance would
+  // answer it with GOAWAY "too_many_pings").
+  lb::AddKeepaliveServerArgs(builder);
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
   builder.RegisterService(&service);
   

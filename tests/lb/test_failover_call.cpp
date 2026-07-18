@@ -44,6 +44,46 @@ TEST(CallWithFailover, StopsOnFirstSuccess) {
     EXPECT_EQ(call_count, 1);
 }
 
+TEST(CallWithFailover, DeadlineExceededReturnsImmediatelyButCoolsDown) {
+    // A deadline can expire after the server already executed the RPC, so
+    // retrying it elsewhere may run a non-idempotent operation twice: no
+    // failover by default. But the expired deadline is the loop's own
+    // per-attempt timeout, so it is still an endpoint-health signal (hung or
+    // overloaded server): the endpoint must enter cooldown so later calls
+    // rotate away from it.
+    lb::EndpointManager manager(2, ManagerOptions());
+    std::vector<std::size_t> calls;
+    const Status status = lb::CallWithFailover(
+        manager, lb::FailoverOptions{},
+        [&](grpc::ClientContext&, std::size_t index) {
+            calls.push_back(index);
+            return Status(StatusCode::DEADLINE_EXCEEDED, "attempt timed out");
+        });
+    EXPECT_EQ(status.error_code(), StatusCode::DEADLINE_EXCEEDED);
+    EXPECT_EQ(calls, (std::vector<std::size_t>{0}));
+    EXPECT_EQ(manager.GetSnapshot(0).failures, 1u);
+    EXPECT_TRUE(manager.GetSnapshot(0).in_cooldown);
+    EXPECT_EQ(manager.GetSnapshot(1).failures, 0u);
+}
+
+TEST(CallWithFailover, DeadlineExceededFailsOverWhenOptedIn) {
+    // Callers whose RPCs are known idempotent can opt deadline expiry into the
+    // retriable set and get failover to the next endpoint.
+    lb::EndpointManager manager(2, ManagerOptions());
+    lb::FailoverOptions options;
+    options.retriable_codes.push_back(StatusCode::DEADLINE_EXCEEDED);
+    std::vector<std::size_t> calls;
+    const Status status = lb::CallWithFailover(
+        manager, options, [&](grpc::ClientContext&, std::size_t index) {
+            calls.push_back(index);
+            return index == 0 ? Status(StatusCode::DEADLINE_EXCEEDED, "attempt timed out")
+                              : Status::OK;
+        });
+    EXPECT_TRUE(status.ok());
+    EXPECT_EQ(calls, (std::vector<std::size_t>{0, 1}));
+    EXPECT_EQ(manager.GetSnapshot(0).failures, 1u);
+}
+
 TEST(CallWithFailover, DoesNotFailOverOnApplicationError) {
     lb::EndpointManager manager(3, ManagerOptions());
     int call_count = 0;

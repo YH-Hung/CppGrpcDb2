@@ -19,10 +19,22 @@ struct ChannelFactoryOptions {
     bool multi_endpoint = false;
     // Overrides the default retry budget of 4 in single-endpoint mode; ignored
     // in multi-endpoint mode, where the budget is pinned to 2 to bound retry
-    // amplification. gRPC requires maxAttempts >= 2 and caps it at 5.
+    // amplification. Clamped to gRPC's valid range [2, 5].
     std::optional<int> max_attempts;
     std::chrono::milliseconds initial_backoff{100};
     std::chrono::milliseconds max_backoff{1000};
+    // Keepalive posture. nullopt (the default) leaves client keepalive
+    // disabled — gRPC's own default and the only setting safe against
+    // uncoordinated servers: their default ping-strike policy permits one
+    // unsolicited ping per 5 minutes even during an active-but-quiet
+    // long-lived RPC, then answers GOAWAY "too_many_pings". Setting a time is
+    // a coordinated opt-in (the in-repo servers apply AddKeepaliveServerArgs,
+    // see lb/keepalive.h); keepalive_timeout and the idle-ping flag apply only
+    // then, and enabling idle pings also lifts gRPC's idle-ping throttle,
+    // which would otherwise stop pinging after 2 pings without data.
+    std::optional<std::chrono::milliseconds> keepalive_time;
+    std::chrono::milliseconds keepalive_timeout{20000};
+    bool keepalive_permit_without_calls = false;
 };
 
 // Service config JSON with a retryPolicy matching all services and methods.

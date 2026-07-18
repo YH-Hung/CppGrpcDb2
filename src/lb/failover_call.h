@@ -19,7 +19,18 @@ struct FailoverOptions {
     // wall-clock for a failed call is up to endpoints_tried * attempt_timeout.
     std::chrono::milliseconds attempt_timeout{2000};
     int max_attempts = 0;  // <= 0: one attempt per endpoint
+    // Statuses that trigger failover to the next endpoint. DEADLINE_EXCEEDED
+    // is deliberately NOT here by default: a deadline can expire after the
+    // server already executed the RPC, so retrying elsewhere may run a
+    // non-idempotent operation twice. Clients whose RPCs are known idempotent
+    // can add it (per client, not per method).
     std::vector<grpc::StatusCode> retriable_codes{grpc::StatusCode::UNAVAILABLE};
+    // Statuses that are returned to the caller un-retried but still count as
+    // an endpoint failure (cooldown). DEADLINE_EXCEEDED reflects the loop's
+    // own per-attempt timeout, so expiry means the endpoint is hung or
+    // overloaded (a TCP-alive server that never answers — keepalive only
+    // catches dead transports); cooling it down rotates later calls away.
+    std::vector<grpc::StatusCode> cooldown_codes{grpc::StatusCode::DEADLINE_EXCEEDED};
 };
 
 // Runs `rpc` against endpoints chosen by `manager`, failing over to the next
@@ -62,10 +73,16 @@ grpc::Status CallWithFailover(EndpointManager& manager, const FailoverOptions& o
             }
             return status;
         }
-        const bool retriable =
-            std::find(options.retriable_codes.begin(), options.retriable_codes.end(),
-                      status.error_code()) != options.retriable_codes.end();
-        if (!retriable) {
+        const auto contains = [](const std::vector<grpc::StatusCode>& codes,
+                                 grpc::StatusCode code) {
+            return std::find(codes.begin(), codes.end(), code) != codes.end();
+        };
+        if (!contains(options.retriable_codes, status.error_code())) {
+            if (contains(options.cooldown_codes, status.error_code())) {
+                manager.ReportFailure(index);
+                spdlog::warn("lb: endpoint {} failed ({}), cooling down without failover",
+                             index, status.error_message());
+            }
             return status;
         }
         manager.ReportFailure(index);

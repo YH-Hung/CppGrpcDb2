@@ -2,6 +2,10 @@
 
 #include <json/json.h>
 
+#include <algorithm>
+
+#include "lb/keepalive.h"
+
 namespace lb {
 
 namespace {
@@ -23,8 +27,10 @@ std::string FormatSeconds(std::chrono::milliseconds duration) {
 
 std::string BuildServiceConfigJson(const ChannelFactoryOptions& options) {
     Json::Value retry_policy;
+    // Clamp to gRPC's valid range: maxAttempts < 2 makes the whole service
+    // config invalid (which lames the channel), > 5 is treated as 5 anyway.
     retry_policy["maxAttempts"] =
-        options.multi_endpoint ? 2 : options.max_attempts.value_or(4);
+        options.multi_endpoint ? 2 : std::clamp(options.max_attempts.value_or(4), 2, 5);
     retry_policy["initialBackoff"] = FormatSeconds(options.initial_backoff);
     retry_policy["maxBackoff"] = FormatSeconds(options.max_backoff);
     retry_policy["backoffMultiplier"] = 2;
@@ -57,10 +63,21 @@ grpc::ChannelArguments MakeChannelArguments(const ChannelFactoryOptions& options
     // Only takes effect when a single endpoint's FQDN resolves to multiple
     // A/AAAA records; balances gRPC's own subchannels across them.
     args.SetLoadBalancingPolicyName("round_robin");
-    // Detect half-dead connections in seconds instead of at the TCP timeout.
-    args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 10000);
-    args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 5000);
-    args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1);
+    // Keepalive is a coordinated opt-in; the default leaves it disabled. See
+    // ChannelFactoryOptions for the rationale.
+    if (options.keepalive_time) {
+        args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS,
+                    static_cast<int>(options.keepalive_time->count()));
+        args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS,
+                    static_cast<int>(options.keepalive_timeout.count()));
+        if (options.keepalive_permit_without_calls) {
+            args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1);
+            // Idle pings are useless if gRPC's throttle stops them after 2
+            // pings without data (GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA).
+            // 0 = unlimited.
+            args.SetInt(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA, 0);
+        }
+    }
     return args;
 }
 

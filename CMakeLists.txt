@@ -123,6 +123,7 @@ target_link_libraries(string_transform_interceptor
     PUBLIC ${_PROTOBUF_LIBPROTOBUF}
     PUBLIC ${SPDLOG_TARGET}
     PUBLIC utf8ansi::utf8ansi
+    PRIVATE otel_tracing
 )
 
 target_compile_features(string_transform_interceptor PUBLIC cxx_std_20)
@@ -158,6 +159,7 @@ target_link_libraries(message_logging_interceptor
     PUBLIC ${_PROTOBUF_LIBPROTOBUF}
     PUBLIC ${SPDLOG_TARGET}
     PUBLIC ${_GRPC_GRPCPP}
+    PRIVATE otel_tracing
 )
 
 target_compile_features(message_logging_interceptor PUBLIC cxx_std_20)

@@ -51,8 +51,9 @@ public:
                 served_index = index;
                 return rpc(ctx, index);
             });
-        return {std::move(status),
-                status.ok() ? endpoints_[served_index].Target() : std::string{}};
+        std::string served_by =
+            status.ok() ? endpoints_[served_index].Target() : std::string{};
+        return {std::move(status), std::move(served_by)};
     }
 
     std::size_t endpoint_count() const { return endpoints_.size(); }
@@ -61,6 +62,10 @@ public:
         return manager_->GetSnapshot(index);
     }
     const FailoverOptions& failover_options() const { return failover_options_; }
+    // Mutable access for per-client tuning (e.g. opting DEADLINE_EXCEEDED into
+    // retriable_codes for idempotent services). Configure before issuing
+    // calls; mutation is not synchronized with in-flight calls.
+    FailoverOptions& failover_options() { return failover_options_; }
 
 protected:
     std::vector<Endpoint> endpoints_;

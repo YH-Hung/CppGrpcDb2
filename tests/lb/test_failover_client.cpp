@@ -219,6 +219,27 @@ TEST(FailoverClient, FailoverOptionsWiredFromConfig) {
               std::chrono::milliseconds(750));
 }
 
+TEST(FailoverClient, RetriableCodesOptInViaFacade) {
+    // A client whose RPCs are known idempotent can opt DEADLINE_EXCEEDED into
+    // failover without dropping to the low-level CallWithFailover API.
+    int calls = 0;
+    auto fc = FakeClient::Make(
+        {[&calls](grpc::ClientContext*, const FakeReq&, FakeResp*) {
+             ++calls;
+             return Status(StatusCode::DEADLINE_EXCEEDED, "slow");
+         },
+         Ok(), Ok()});
+    fc.client->failover_options().retriable_codes.push_back(
+        StatusCode::DEADLINE_EXCEEDED);
+    FakeReq req{"world"};
+    FakeResp resp;
+    const lb::CallResult result =
+        fc.client->Call(req, resp, &FakeStub::SayHello);
+    EXPECT_TRUE(result.status.ok());
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(result.served_by, "svc-b.example.com:50051");
+}
+
 TEST(FailoverClient, DefaultMaxAttemptsDoesNotDisableFailover) {
     // Explicit construction without setting max_attempts: the default (0) must
     // not silently cap to one attempt. CallWithFailover treats 0 as "all

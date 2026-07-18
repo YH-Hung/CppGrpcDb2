@@ -413,10 +413,11 @@ TEST_F(FailoverLiveTest, MaxAttemptsCapsRetriesOnRealChannels) {
 }
 
 // 8. Slow endpoint deadline: inject a delay exceeding attempt_timeout on
-// server 0. The attempt times out with DEADLINE_EXCEEDED. Since
-// DEADLINE_EXCEEDED is not in the default retriable set, the call returns
-// immediately without failover.
-TEST_F(FailoverLiveTest, SlowEndpointDeadlineExceededDoesNotFailOver) {
+// server 0. The attempt times out with DEADLINE_EXCEEDED, which is returned
+// to the caller un-retried (the server may have already executed the RPC, so
+// failing over could run a non-idempotent operation twice) — but the slow
+// endpoint still enters cooldown, so the next call rotates to a healthy one.
+TEST_F(FailoverLiveTest, SlowEndpointDeadlineExceededCoolsDownWithoutFailover) {
     lb::LbConfig config;
     config.endpoints.clear();
     for (const std::string& t : targets_) {
@@ -442,9 +443,16 @@ TEST_F(FailoverLiveTest, SlowEndpointDeadlineExceededDoesNotFailOver) {
     EXPECT_TRUE(result.served_by.empty());
     // The call should return around the attempt_timeout, not after the 1s delay.
     EXPECT_LT(elapsed, std::chrono::milliseconds(800));
-    // Servers 1 and 2 were NOT tried.
+    // Servers 1 and 2 were NOT tried...
     EXPECT_EQ(handles_[1]->service->calls(), 0);
     EXPECT_EQ(handles_[2]->service->calls(), 0);
+    // ...but the slow endpoint was reported failed and is cooling down,
+    EXPECT_EQ(client.snapshot(0).failures, 1u);
+    EXPECT_TRUE(client.snapshot(0).in_cooldown);
+    // so the next call rotates to a healthy endpoint and succeeds quickly.
+    const lb::CallResult next = SayHello(client, "after-cooldown");
+    EXPECT_TRUE(next.status.ok());
+    EXPECT_EQ(next.served_by, targets_[1]);
 }
 
 // 9. Concurrent calls through one FailoverClient: all succeed and every
