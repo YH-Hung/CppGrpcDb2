@@ -148,6 +148,7 @@ target_compile_features(metrics_interceptor PUBLIC cxx_std_20)
 # Message logging interceptor library
 add_library(message_logging_interceptor
         src/interceptor/message_logging_interceptor.cpp
+        src/interceptor/message_logging_client_interceptor.cpp
 )
 
 target_include_directories(message_logging_interceptor
@@ -289,6 +290,7 @@ target_link_libraries(greeter_girl_client
 create_grpc_executable(greeter_failover_client "src/greeter_failover_client.cpp")
 target_link_libraries(greeter_failover_client
     PRIVATE grpc_client_lb
+    PRIVATE message_logging_interceptor
 )
 
 # ==============================================================================
@@ -478,6 +480,19 @@ target_link_libraries(lb_failover_live_tests
 )
 add_test(NAME lb_failover_live_tests COMMAND lb_failover_live_tests)
 target_compile_features(lb_failover_live_tests PRIVATE cxx_std_20)
+
+# Client message logging interceptor test (in-process server, real channel)
+add_executable(message_logging_client_interceptor_tests
+    tests/interceptor/test_message_logging_client_interceptor.cpp)
+target_link_libraries(message_logging_client_interceptor_tests
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE message_logging_interceptor
+    PRIVATE helloworld_proto
+)
+add_test(NAME message_logging_client_interceptor_tests
+         COMMAND message_logging_client_interceptor_tests)
+target_compile_features(message_logging_client_interceptor_tests PRIVATE cxx_std_20)
 
 # CQ worker metrics unit tests
 add_executable(cq_worker_metrics_tests tests/metrics/test_cq_worker_metrics.cpp)

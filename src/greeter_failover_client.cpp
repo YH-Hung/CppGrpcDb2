@@ -4,11 +4,15 @@
 
 #include <chrono>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "helloworld.grpc.pb.h"
 #include "lb/failover_client.h"
+#include "message_logging_client_interceptor.h"
 
 using grpc::Status;
 using helloworld::Greeter;
@@ -51,8 +55,22 @@ int main(int argc, char** argv) {
     // asserts on); route the lb library's spdlog diagnostics to stderr.
     spdlog::set_default_logger(spdlog::stderr_color_mt("lb_client"));
 
-    lb::FailoverClient<Greeter> client =
-        lb::FailoverClient<Greeter>::FromEnv();
+    // Same target/credentials/args as the default builder, plus a per-RPC
+    // message logging interceptor (request/response JSON on stderr).
+    lb::ChannelBuilder logging_channel_builder =
+        [](const lb::Endpoint& endpoint, const grpc::ChannelArguments& args) {
+            std::vector<std::unique_ptr<grpc::experimental::ClientInterceptorFactoryInterface>> creators;
+            creators.push_back(std::make_unique<MessageLoggingClientInterceptorFactory>());
+
+            return grpc::experimental::CreateCustomChannelWithInterceptors(endpoint.Target(),
+                grpc::InsecureChannelCredentials(), args,std::move(creators));
+        };
+
+    lb::FailoverClient<Greeter> client = lb::FailoverClient<Greeter>::FromEnv(
+        [](std::shared_ptr<grpc::Channel> channel) {
+            return Greeter::NewStub(std::move(channel));
+        },
+        std::move(logging_channel_builder));
 
     bool all_ok = true;
     for (int i = 0; i < count; ++i) {
