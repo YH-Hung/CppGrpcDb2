@@ -149,6 +149,7 @@ target_compile_features(metrics_interceptor PUBLIC cxx_std_20)
 add_library(message_logging_interceptor
         src/interceptor/message_logging_interceptor.cpp
         src/interceptor/message_logging_client_interceptor.cpp
+        src/interceptor/sensitive_field_redactor.cpp
 )
 
 target_include_directories(message_logging_interceptor
@@ -161,6 +162,7 @@ target_link_libraries(message_logging_interceptor
     PUBLIC ${SPDLOG_TARGET}
     PUBLIC ${_GRPC_GRPCPP}
     PRIVATE otel_tracing
+    PRIVATE OpenSSL::Crypto
 )
 
 target_compile_features(message_logging_interceptor PUBLIC cxx_std_20)
@@ -493,6 +495,19 @@ target_link_libraries(message_logging_client_interceptor_tests
 add_test(NAME message_logging_client_interceptor_tests
          COMMAND message_logging_client_interceptor_tests)
 target_compile_features(message_logging_client_interceptor_tests PRIVATE cxx_std_20)
+
+# Sensitive-field redactor unit tests
+add_executable(sensitive_field_redactor_tests
+    tests/interceptor/test_sensitive_field_redactor.cpp)
+target_link_libraries(sensitive_field_redactor_tests
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
+    PRIVATE message_logging_interceptor
+    PRIVATE redaction_probe_proto
+)
+add_test(NAME sensitive_field_redactor_tests
+         COMMAND sensitive_field_redactor_tests)
+target_compile_features(sensitive_field_redactor_tests PRIVATE cxx_std_20)
 
 # CQ worker metrics unit tests
 add_executable(cq_worker_metrics_tests tests/metrics/test_cq_worker_metrics.cpp)

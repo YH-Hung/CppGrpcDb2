@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package redaction_probe;
+
+import "google/protobuf/any.proto";
+
+// Test-only shapes for SensitiveFieldRedactor: nested, repeated, map, bytes,
+// recursive, and clean (no sensitive field anywhere) messages.
+
+message Credentials {
+  string username = 1;
+  string password = 2;
+  bytes pwd = 3;
+}
+
+// Recursive type: planning must terminate despite the cycle.
+message Node {
+  repeated string pwd = 1;
+  Node next = 2;
+}
+
+message ProbeRequest {
+  string name = 1;
+  string password = 2;
+  Credentials credentials = 3;
+  repeated Credentials cred_list = 4;
+  map<string, Credentials> cred_map = 5;
+  map<string, string> pwd_by_user = 6;  // name does not match: values kept
+  map<string, string> pwd = 7;          // name matches: values hashed
+  Node chain = 8;
+  string api_key = 9;                   // sensitive only under a custom config
+}
+
+message CleanRequest {
+  string name = 1;
+  int32 count = 2;
+}
+
+// No directly sensitive field: only the packed payloads can contain one, so
+// the planner must treat Any fields as potentially sensitive.
+message AnyEnvelope {
+  string note = 1;
+  google.protobuf.Any payload = 2;
+  repeated google.protobuf.Any extras = 3;
+}

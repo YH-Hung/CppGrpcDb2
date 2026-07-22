@@ -127,4 +127,41 @@ TEST(MessageLoggingClientInterceptor, LogsRequestAndResponseAsJson) {
         << logs;
 }
 
+TEST(MessageLoggingClientInterceptor, HashesSensitiveRequestFields) {
+    auto server = StartServer();
+    if (!server) GTEST_SKIP() << "cannot bind a loopback port";
+
+    SpdlogCapture capture;
+
+    std::vector<
+        std::unique_ptr<grpc::experimental::ClientInterceptorFactoryInterface>>
+        creators;
+    creators.push_back(
+        std::make_unique<MessageLoggingClientInterceptorFactory>());
+    auto channel = grpc::experimental::CreateCustomChannelWithInterceptors(
+        "127.0.0.1:" + std::to_string(server->selected_port),
+        grpc::InsecureChannelCredentials(), grpc::ChannelArguments(),
+        std::move(creators));
+    auto stub = Greeter::NewStub(channel);
+
+    grpc::ClientContext ctx;
+    HelloRequest request;
+    request.set_name("alice");
+    request.set_password("hunter2");
+    HelloReply reply;
+    const Status status = stub->SayHello(&ctx, request, &reply);
+
+    ASSERT_TRUE(status.ok()) << status.error_message();
+
+    const std::string logs = capture.text();
+    // printf '%s' hunter2 | shasum -a 256
+    EXPECT_NE(
+        logs.find("\"password\":\"f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb"
+                  "29541f94bcf526a3f6c7\""),
+        std::string::npos)
+        << logs;
+    EXPECT_EQ(logs.find("hunter2"), std::string::npos) << logs;
+    EXPECT_NE(logs.find("\"name\":\"alice\""), std::string::npos) << logs;
+}
+
 }  // namespace
